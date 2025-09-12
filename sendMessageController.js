@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { processarMensagem } from './atendimento.js';
+import { processarMensagem } from './processarMensagem.js';
 import { enviarMensagem } from './wppconnectService.js';
 
 dotenv.config();

@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:21465/api';
 const SESSION = 'teste';
-const TOKEN = '$2b$10$ekoeQtBoEQK6u4986EK0zOWqgbQiV_J2qKWf88M_YuKvLmw0OFoR6';
+const TOKEN = '$2b$10$bkWdmllu0arMgfrgWsPUI.pjfCf43.s6QoJY.hU6EOeBVDAj_MM76';
 
 export async function enviarMensagem(phone, message) {
   console.log('🧪 Verificando configurações de envio de mensagem...');
