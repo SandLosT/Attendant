@@ -1,4 +1,4 @@
-import { db } from './src/database/index.js';
+import { db } from '../src/database/index.js';
 
 export async function salvarMensagem(cliente_id, mensagem, tipo) {
   await db('historico_mensagens').insert({

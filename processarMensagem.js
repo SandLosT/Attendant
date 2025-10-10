@@ -1,4 +1,4 @@
-import { gerarRespostaComImagem } from './openaiService.js'; // ou './ia/orcamentoIA.js' se preferir
+import { gerarRespostaComImagem } from './service/historicoService.js'; // ou './ia/orcamentoIA.js' se preferir
 import {
   obterOuCriarCliente,
   salvarMensagem,

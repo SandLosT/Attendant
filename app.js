@@ -1,7 +1,7 @@
 import express from 'express';
 import * as dotenv from 'dotenv';
 import { processarMensagem } from './processarMensagem.js';
-import { enviarMensagem } from './wppconnectService.js';
+import { enviarMensagem } from './service/wppconnectService.js';
 import uploadImagem from './uploadImagem.js';
 
 dotenv.config();

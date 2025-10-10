@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-import { obterOuCriarCliente } from './historicoService.js';
+import { obterOuCriarCliente } from './service/historicoService.js';
 import { salvarImagem } from './imagemService.js';
 
 const router = express.Router();
