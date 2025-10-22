@@ -1,16 +1,16 @@
-import { db } from '../src/database/index.js';
+import { db } from '../database/index.js';
 
-export async function salvarMensagem(cliente_id, mensagem, tipo) {
+export async function salvarMensagem(clienteId, mensagem, tipo) {
   await db('historico_mensagens').insert({
-    cliente_id,
+    cliente_id: clienteId,
     mensagem,
     tipo
   });
 }
 
-export async function obterUltimasMensagens(cliente_id, limite = 5) {
-  return await db('historico_mensagens')
-    .where({ cliente_id })
+export async function obterUltimasMensagens(clienteId, limite = 5) {
+  return db('historico_mensagens')
+    .where({ cliente_id: clienteId })
     .orderBy('data_envio', 'desc')
     .limit(limite);
 }
