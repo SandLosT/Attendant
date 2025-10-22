@@ -1,4 +1,4 @@
-import { gerarResposta } from './openaiService.js';
+import { gerarResposta } from '../services/openaiService.js';
 
 export async function gerarRespostaComImagem(contextoHistorico, dadosLoja, imagens = []) {
   const contextoLoja = `
@@ -23,5 +23,5 @@ ${listaImagens || 'Nenhuma'}
 Gere uma resposta clara, sem repetir, e com base no que a oficina oferece. Se for um serviço não oferecido, diga isso claramente.
 `;
 
-  return await gerarResposta(prompt.trim());
+  return gerarResposta(prompt.trim());
 }

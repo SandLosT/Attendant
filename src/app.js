@@ -1,8 +1,9 @@
 import express from 'express';
 import * as dotenv from 'dotenv';
-import { processarMensagem } from './processarMensagem.js';
-import { enviarMensagem } from './service/wppconnectService.js';
-import uploadImagem from './uploadImagem.js';
+import { processarMensagem } from './usecases/processarMensagem.js';
+import { enviarMensagem } from './services/wppconnectService.js';
+import uploadImagemRouter from './routes/uploadImagemRouter.js';
+import imageUploadRouter from './routes/imageUploadRouter.js';
 
 dotenv.config();
 
@@ -10,7 +11,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json({ limit: '10mb' }));
-app.use('/upload', uploadImagem);
+app.use('/upload', uploadImagemRouter);
+app.use('/uploads', imageUploadRouter);
 // Rota de teste
 app.get('/', (req, res) => {
   res.send('Servidor de atendimento IA rodando');

@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
-import { processarMensagem } from './processarMensagem.js';
-import { enviarMensagem } from './wppconnectService.js';
+import { processarMensagem } from '../usecases/processarMensagem.js';
+import { enviarMensagem } from '../services/wppconnectService.js';
 
 dotenv.config();
 const SESSION = process.env.SESSION;
