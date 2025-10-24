@@ -3,4 +3,8 @@ node_modules/
 npm-debug.log*
 .DS_Store
 src/uploads/
+<<<<<<< HEAD
 src/public/uploads/
+=======
+src/public/uploads/
+>>>>>>> df39177d7e1a0b918d66da66a6f1523c2759d323

@@ -1,11 +1,11 @@
-import { gerarRespostaComImagem } from './service/historicoService.js'; // ou './ia/orcamentoIA.js' se preferir
+import { gerarRespostaComImagem } from '../services/openaiService.js';
 import {
   obterOuCriarCliente,
   salvarMensagem,
   obterUltimasMensagens
-} from './historicoService.js';
-import { obterInfoLoja } from './lojaService.js';
-import { obterImagensPorCliente } from './imagemService.js';
+} from '../services/historicoService.js';
+import { obterInfoLoja } from '../services/lojaService.js';
+import { obterImagensPorCliente } from '../services/imagemService.js';
 
 export async function processarMensagem(telefone, mensagem) {
   const cliente = await obterOuCriarCliente(telefone);
@@ -13,12 +13,19 @@ export async function processarMensagem(telefone, mensagem) {
 
   const historico = await obterUltimasMensagens(cliente.id);
   const loja = await obterInfoLoja();
-  const imagens = await obterImagensPorCliente(cliente.id); // busca as imagens recentes
+  if (!loja) {
+    throw new Error('Informações da loja não foram configuradas.');
+  }
+
+  const imagens = await obterImagensPorCliente(cliente.id);
 
   const contextoHistorico = historico
     .reverse()
-    .map(msg => `${msg.tipo === 'entrada' ? 'Cliente' : 'Atendente'}: ${msg.mensagem}`)
+    .map((msg) => `${msg.tipo === 'entrada' ? 'Cliente' : 'Atendente'}: ${msg.mensagem}`)
     .join('\n');
+
+  const telefoneLoja = loja.telefone || loja.telefone_loja || 'Não informado';
+  const tabelaPrecos = loja.politicas_preco ? JSON.stringify(loja.politicas_preco) : 'Não informado';
 
   const contextoLoja = `
 📄 Informações da oficina:
@@ -26,18 +33,28 @@ export async function processarMensagem(telefone, mensagem) {
 - Descrição: ${loja.descricao}
 - Serviços oferecidos: ${loja.servicos}
 - Horário de atendimento: ${loja.horario_atendimento}
-- Endereço: ${loja.endereco}
-- Telefone da loja: ${loja.telefone_loja}
+- Endereço: ${loja.endereco || 'Não informado'}
+- Telefone da loja: ${telefoneLoja}
 - Redes sociais (Instagram, se disponível): ${loja.instagram || 'Não informado'}
-- Tabela de preços: ${JSON.stringify(loja.politicas_preco)}
+- Tabela de preços: ${tabelaPrecos}
 `;
+
+  const imagensMaisRecentes =
+    imagens.length > 0
+      ? imagens
+          .map(
+            (img, i) =>
+              `Imagem ${i + 1}: ${img.nome_original || 'sem nome'} (hash: ${img.hash || 'sem hash'})`
+          )
+          .join('\n')
+      : 'Nenhuma imagem recebida.';
 
   const prompt = `
 Você é um atendente da oficina ${loja.nome}, especializado em responder clientes pelo WhatsApp.
 
-📌 Responda exclusivamente com base nas informações abaixo da oficina.  
-🚫 **Nunca invente nomes, endereços, serviços, redes sociais ou preços.**  
-✅ Se o cliente pedir algo que **não está nos serviços listados**, diga gentilmente que **não oferecemos esse serviço no momento**.  
+📌 Responda exclusivamente com base nas informações abaixo da oficina.
+🚫 **Nunca invente nomes, endereços, serviços, redes sociais ou preços.**
+✅ Se o cliente pedir algo que **não está nos serviços listados**, diga gentilmente que **não oferecemos esse serviço no momento**.
 🔍 Se a pergunta não for sobre os serviços da loja, responda de forma neutra ou genérica (ex: elogios, saudações, dúvidas pessoais).
 📷 Se o cliente já enviou imagens, leve isso em consideração para a resposta.
 
@@ -47,7 +64,7 @@ ${contextoLoja}
 ${contextoHistorico}
 
 🖼️ Imagens mais recentes enviadas pelo cliente:
-${imagens.length > 0 ? imagens.map((img, i) => `Imagem ${i + 1}: ${img.nome_original || 'sem nome'} (hash: ${img.hash || 'sem hash'})`).join('\n') : 'Nenhuma imagem recebida.'}
+${imagensMaisRecentes}
 
 📥 Nova mensagem do cliente: "${mensagem}"
 

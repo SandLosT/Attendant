@@ -3,12 +3,12 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-import { obterOuCriarCliente } from './service/historicoService.js';
-import { salvarImagem } from './imagemService.js';
+import { obterOuCriarCliente } from '../services/historicoService.js';
+import { salvarImagem } from '../services/imagemService.js';
 
 const router = express.Router();
 
-const uploadDir = 'src/uploads';
+const uploadDir = path.join('src', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -39,7 +39,12 @@ router.post('/:telefone', upload.single('imagem'), async (req, res) => {
     const nomeOriginal = file.originalname;
     const hash = gerarHashSimples(caminho); // pode trocar por real hash de imagem
 
-    await salvarImagem(cliente.id, caminho, nomeOriginal, hash);
+    await salvarImagem({
+      clienteId: cliente.id,
+      caminho,
+      nomeOriginal,
+      hash
+    });
     res.status(200).json({ sucesso: true, mensagem: 'Imagem salva com sucesso' });
   } catch (err) {
     console.error('Erro ao salvar imagem:', err);
