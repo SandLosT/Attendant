@@ -19,33 +19,43 @@ app.get('/', (req, res) => {
 });
 
 // Webhook real vindo do WPPConnect
-app.post('/webhook', async (req, res) => {
-  console.log('📥 Webhook recebido:', JSON.stringify(req.body, null, 2));
+const webhookRoutes = ['/webhook', '/webhook/:sessionId', '/webhook/:sessionId/:event'];
 
-  const evento = req.body;
+webhookRoutes.forEach((route) => {
+  app.get(route, (_req, res) => {
+    // Alguns eventos de verificação do WPPConnect utilizam GET.
+    // Respondemos 200 para evitar erros de registro do webhook.
+    res.status(200).json({ status: 'webhook-ok' });
+  });
 
-  // Só processa mensagens de texto normais
-  if (evento.event === 'onmessage' && evento.type === 'chat') {
-    const telefone = evento.from.replace('@c.us', '');
-    const mensagem = evento.body;
+  app.post(route, async (req, res) => {
+    console.log('📥 Webhook recebido:', JSON.stringify(req.body, null, 2));
 
-    if (!telefone || !mensagem) {
-      return res.status(400).json({ erro: 'Dados inválidos do webhook' });
+    const evento = req.body;
+
+    // Só processa mensagens de texto normais
+    if (evento.event === 'onmessage' && evento.type === 'chat') {
+      const telefone = evento.from.replace('@c.us', '');
+      const mensagem = evento.body;
+
+      if (!telefone || !mensagem) {
+        return res.status(400).json({ erro: 'Dados inválidos do webhook' });
+      }
+
+      try {
+        // Processa com IA e envia resposta
+        const resposta = await processarMensagem(telefone, mensagem);
+        await enviarMensagem(telefone, resposta);
+        return res.sendStatus(200);
+      } catch (err) {
+        console.error('❌ Erro ao processar mensagem:', err);
+        return res.status(500).json({ erro: err.message });
+      }
     }
 
-    try {
-      // Processa com IA e envia resposta
-      const resposta = await processarMensagem(telefone, mensagem);
-      await enviarMensagem(telefone, resposta);
-      return res.sendStatus(200);
-    } catch (err) {
-      console.error('❌ Erro ao processar mensagem:', err);
-      return res.status(500).json({ erro: err.message });
-    }
-  }
-
-  // Ignora eventos que não sejam mensagens de texto
-  res.status(200).json({ info: 'Evento ignorado' });
+    // Ignora eventos que não sejam mensagens de texto
+    res.status(200).json({ info: 'Evento ignorado' });
+  });
 });
 
 // Inicia o servidor
