@@ -29,6 +29,154 @@ const proxyConfig = WPP_PROXY_HOST
 let sessionInitialized = false;
 let sessionInitializingPromise = null;
 
+function buildAuthHeaders() {
+  const headers = {};
+
+  if (WPP_TOKEN) {
+    headers.Authorization = `Bearer ${WPP_TOKEN}`;
+  }
+
+  if (WPP_SESSION_TOKEN) {
+    headers['x-session-token'] = WPP_SESSION_TOKEN;
+  }
+
+  return headers;
+}
+
+function getBaseStartPayload() {
+  return {
+    webhook: WPP_WEBHOOK,
+    waitForQrCode,
+    token: WPP_SESSION_TOKEN ?? WPP_TOKEN,
+    ...(proxyConfig ? { proxy: proxyConfig } : {}),
+  };
+}
+
+function getStartSessionStrategies() {
+  const basePayload = getBaseStartPayload();
+
+  return [
+    {
+      description: 'legacy start-session route',
+      url: `${WPP_API_URL}/${WPP_SESSION}/start-session`,
+      payload: basePayload,
+    },
+    {
+      description: 'new /sessions/start route',
+      url: `${WPP_API_URL}/sessions/start`,
+      payload: {
+        session: WPP_SESSION,
+        ...basePayload,
+      },
+    },
+    {
+      description: 'new /sessions/:session/start route',
+      url: `${WPP_API_URL}/sessions/${WPP_SESSION}/start`,
+      payload: basePayload,
+    },
+    {
+      description: 'new /session/start route',
+      url: `${WPP_API_URL}/session/start`,
+      payload: {
+        session: WPP_SESSION,
+        ...basePayload,
+      },
+    },
+    {
+      description: 'fallback start route',
+      url: `${WPP_API_URL}/${WPP_SESSION}/start`,
+      payload: basePayload,
+    },
+    {
+      description: 'fallback start-session root route',
+      url: `${WPP_API_URL}/start-session`,
+      payload: {
+        session: WPP_SESSION,
+        ...basePayload,
+      },
+    },
+  ];
+}
+
+function getSendMessageStrategies(messagePayload) {
+  const basePayload = {
+    ...messagePayload,
+    session: WPP_SESSION,
+  };
+
+  return [
+    {
+      description: 'legacy send-message route',
+      url: `${WPP_API_URL}/${WPP_SESSION}/send-message`,
+      payload: messagePayload,
+    },
+    {
+      description: 'new /sessions/send-message route',
+      url: `${WPP_API_URL}/sessions/send-message`,
+      payload: basePayload,
+    },
+    {
+      description: 'new /session/send-message route',
+      url: `${WPP_API_URL}/session/send-message`,
+      payload: basePayload,
+    },
+    {
+      description: 'new /sessions/:session/send-message route',
+      url: `${WPP_API_URL}/sessions/${WPP_SESSION}/send-message`,
+      payload: messagePayload,
+    },
+    {
+      description: 'messages/send route',
+      url: `${WPP_API_URL}/messages/send`,
+      payload: basePayload,
+    },
+    {
+      description: 'messages/text route',
+      url: `${WPP_API_URL}/messages/text`,
+      payload: {
+        session: WPP_SESSION,
+        text: messagePayload.message,
+        phone: messagePayload.recipientPhone ?? messagePayload.phone?.[0],
+        recipientPhone: messagePayload.recipientPhone ?? messagePayload.phone?.[0],
+      },
+    },
+    {
+      description: 'message/text route',
+      url: `${WPP_API_URL}/message/text`,
+      payload: {
+        session: WPP_SESSION,
+        text: messagePayload.message,
+        phone: messagePayload.recipientPhone ?? messagePayload.phone?.[0],
+        recipientPhone: messagePayload.recipientPhone ?? messagePayload.phone?.[0],
+      },
+    },
+  ];
+}
+
+async function executarEstrategias(estrategias, acao) {
+  const headers = buildAuthHeaders();
+  const erros = [];
+
+  for (const { description, url, payload } of estrategias) {
+    try {
+      console.log(`➡️  Tentando ${acao} via ${description}: ${url}`);
+      const response = await axios.post(url, payload, {
+        headers,
+      });
+      return response;
+    } catch (err) {
+      const errorData = err.response?.data || err.message;
+      console.warn(`⚠️  Falha usando ${description}:`, errorData);
+      erros.push({ description, error: errorData });
+    }
+  }
+
+  const errorSummary = erros
+    .map((item) => `${item.description}: ${JSON.stringify(item.error)}`)
+    .join(' | ');
+  throw new Error(`Não foi possível ${acao}. Tentativas: ${errorSummary}`);
+}
+
 async function iniciarSessaoSeNecessario() {
   if (sessionInitialized) {
     return;
@@ -47,19 +195,10 @@ async function iniciarSessaoSeNecessario() {
     console.log('✅ Proxy configurado:', JSON.stringify(proxyConfig));
   }
 
-  const payload = {
-    webhook: WPP_WEBHOOK,
-    waitForQrCode,
-    token: WPP_SESSION_TOKEN ?? WPP_TOKEN,
-    ...(proxyConfig ? { proxy: proxyConfig } : {}),
-  };
-
-  sessionInitializingPromise = axios
-    .post(`${WPP_API_URL}/${WPP_SESSION}/start-session`, payload, {
-      headers: {
-        Authorization: `Bearer ${WPP_TOKEN}`,
-      },
-    })
+  sessionInitializingPromise = executarEstrategias(
+    getStartSessionStrategies(),
+    'iniciar sessão'
+  )
     .then((response) => {
       sessionInitialized = true;
       console.log('✅ Sessão iniciada ou já existente:', response.data);
@@ -67,9 +206,8 @@ async function iniciarSessaoSeNecessario() {
     })
     .catch((err) => {
       sessionInitialized = false;
-      const errorData = err.response?.data || err.message;
-      console.error('❌ Falha ao iniciar sessão no WPPConnect:', errorData);
-      throw errorData;
+      console.error('❌ Falha ao iniciar sessão no WPPConnect:', err.message || err);
+      throw err;
     })
     .finally(() => {
       sessionInitializingPromise = null;
@@ -89,23 +227,22 @@ export async function enviarMensagem(phone, message) {
   await iniciarSessaoSeNecessario();
 
   try {
+    const normalizedPhone = Array.isArray(phone) ? phone : [phone];
+    const primaryPhone = normalizedPhone[0];
     const payload = {
-      phone: Array.isArray(phone) ? phone : [phone],
+      phone: normalizedPhone,
       isGroup: false,
       isNewsletter: false,
       isLid: false,
       message,
       options: {},
+      recipientPhone: primaryPhone,
+      text: message,
     };
 
-    const response = await axios.post(
-      `${WPP_API_URL}/${WPP_SESSION}/send-message`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${WPP_TOKEN}`,
-        },
-      }
+    const response = await executarEstrategias(
+      getSendMessageStrategies(payload),
+      'enviar mensagem'
     );
 
     console.log('✅ Mensagem enviada com sucesso:', response.data);
