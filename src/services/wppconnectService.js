@@ -3,7 +3,7 @@ import axios from 'axios';
 const {
   WPP_API_URL = 'http://localhost:21465/api',
   WPP_SESSION = 'teste',
-  WPP_TOKEN = '',
+  WPP_TOKEN = '$2b$10$IkMJvaIINRIUhxRS8FnHA.NUozJ5YwjQSRur396w.eAHkkmcydCra',
   WPP_SESSION_TOKEN,
   WPP_WEBHOOK = 'http://localhost:3001/webhook',
   WPP_WAIT_FOR_QR_CODE = 'false',

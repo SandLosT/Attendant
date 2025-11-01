@@ -1,0 +1,42 @@
+[33mcommit 70860856d4c0203ef6e10dd851f4ca14e15fa4d6[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcodex/organize-files-into-packages[m[33m, [m[1;31morigin/codex/organize-files-into-packages[m[33m)[m
+Author: Jhon <142359558+SandLosT@users.noreply.github.com>
+Date:   Wed Oct 22 11:20:15 2025 -0300
+
+    Organize application files into src packages
+
+[33mcommit 700ed57f5127ba55d75183473060b04a5d3d8707[m
+Author: Jhon <jhonrobertoalthaus@gmail.com>
+Date:   Wed Oct 22 10:33:41 2025 -0300
+
+    Commiting all changes to github for the codex can make the enchances in the project
+
+[33mcommit ae49628ee465eef48a7ec090a7c002dafa499c88[m
+Author: Jhon <jhonrobertoalthaus@gmail.com>
+Date:   Fri Oct 10 18:19:28 2025 -0300
+
+    commiting the alterations
+
+[33mcommit f639be22956541450da9dc9418dcee4103bd7b23[m
+Merge: 0398377 31450c4
+Author: Jhon <jhonrobertoalthaus@gmail.com>
+Date:   Fri Sep 12 01:30:21 2025 -0300
+
+    Merge branch 'main' of https://github.com/SandLosT/Attendant
+
+[33mcommit 03983778997547eb754a1ab06a92af4577981409[m
+Author: Jhon <jhonrobertoalthaus@gmail.com>
+Date:   Fri Sep 12 01:29:36 2025 -0300
+
+    Commiting the last changes
+
+[33mcommit 31450c40642ec7c071fb698fed40867267ce8bcd[m
+Author: Jhon <142359558+SandLosT@users.noreply.github.com>
+Date:   Sat Jun 28 18:08:28 2025 -0300
+
+    Delete node_modules directory
+
+[33mcommit 651b03c5d18b1d79146f969e727c39dbe4e3e375[m
+Author: Jhon <jhonrobertoalthaus@gmail.com>
+Date:   Sat Jun 28 18:07:29 2025 -0300
+
+    first commit
