@@ -1,12 +1,27 @@
 import path from 'path';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+
+const {
+  DB_CLIENT = 'mysql2',
+  DB_HOST = '127.0.0.1',
+  DB_PORT = '3306',
+  DB_USER = 'root',
+  DB_PASSWORD = '130178',
+  DB_NAME = 'sistema_orcamentos',
+} = process.env;
 
 export default {
   development: {
-    client: 'sqlite3',
+    client: DB_CLIENT,
     connection: {
-      filename: path.resolve('src/database/db.sqlite')  // ← isso deve estar correto
+      host: DB_HOST,
+      port: Number(DB_PORT),
+      user: DB_USER,
+      password: DB_PASSWORD,
+      database: DB_NAME,
     },
-    useNullAsDefault: true,
     migrations: {
       directory: path.resolve('src/database/migrations'),
     },
