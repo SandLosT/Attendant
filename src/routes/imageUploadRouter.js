@@ -3,46 +3,71 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
+import { obterOuCriarCliente } from '../services/historicoService.js';
 import { salvarImagem } from '../services/imagemService.js';
-import { obterEmbeddingDoServico } from '../utils/embedClient.js';
+import {
+  obterEmbeddingDoServico,
+  obterEstimativaOrcamentoPorEmbedding
+} from '../utils/embedClient.js';
 
 const router = express.Router();
 
-const upload = multer({ dest: path.join('src', 'uploads', 'tmp') });
+const uploadDir = path.join('src', 'public', 'uploads');
 
-router.post('/', upload.single('file'), async (req, res) => {
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const baseName = path.basename(file.originalname, ext);
+    cb(null, `${baseName}-${timestamp}${ext}`);
+  }
+});
+
+const upload = multer({ storage });
+
+router.post('/:telefone', upload.single('imagem'), async (req, res) => {
+  const { telefone } = req.params;
+  const { file } = req;
+
+  if (!telefone) {
+    return res.status(400).json({ error: 'Telefone é obrigatório' });
+  }
+
+  if (!file) {
+    return res.status(400).json({ error: 'Imagem não enviada' });
+  }
+
   try {
-    const { file } = req;
-    if (!file) {
-      return res.status(400).json({ error: 'Arquivo não enviado' });
-    }
-
-    const clienteId = req.body.clienteId ? Number(req.body.clienteId) : null;
-    if (!clienteId) {
-      return res.status(400).json({ error: 'clienteId é obrigatório' });
-    }
-
-    const destinoFinal = path.join('src', 'public', 'uploads');
-    if (!fs.existsSync(destinoFinal)) {
-      fs.mkdirSync(destinoFinal, { recursive: true });
-    }
-
-    const destino = path.join(destinoFinal, file.originalname);
-    fs.renameSync(file.path, destino);
-
-    const embedding = await obterEmbeddingDoServico(destino);
+    const cliente = await obterOuCriarCliente(telefone);
+    const embedding = await obterEmbeddingDoServico(file.path);
 
     await salvarImagem({
-      clienteId,
-      caminho: destino,
+      clienteId: cliente.id,
+      caminho: file.path,
       nomeOriginal: file.originalname,
       embedding
     });
 
-    res.json({ message: 'Upload realizado com sucesso', file: file.originalname });
+    const estimativa = await obterEstimativaOrcamentoPorEmbedding(embedding);
+    const { orcamento = null, detalhes = [] } = estimativa ?? {};
+
+    res.json({
+      message: 'Upload realizado com sucesso',
+      file: {
+        nomeOriginal: file.originalname,
+        nomeSalvo: file.filename,
+        caminho: file.path
+      },
+      orcamento,
+      detalhes
+    });
   } catch (err) {
-    console.error('Erro upload:', err.message);
-    res.status(500).json({ error: 'Erro ao fazer upload' });
+    console.error('Erro upload imagem:', err);
+    res.status(500).json({ error: 'Erro ao processar upload da imagem' });
   }
 });
 

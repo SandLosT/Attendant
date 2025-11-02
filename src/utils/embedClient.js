@@ -20,3 +20,16 @@ export async function obterEmbeddingDoServico(caminhoImagem) {
     throw err;
   }
 }
+
+export async function obterEstimativaOrcamentoPorEmbedding(embedding, topK = 5) {
+  try {
+    const res = await axios.post(`${EMBED_SERVICE_URL}/estimate`, {
+      embedding,
+      top_k: topK,
+    });
+    return res.data;
+  } catch (err) {
+    console.error("Erro ao obter estimativa de orçamento:", err.message);
+    throw err;
+  }
+}
