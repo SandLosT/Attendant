@@ -6,16 +6,20 @@
 import sqlite3 from 'sqlite3';
 import mysql from 'mysql2/promise';
 import path from 'path';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
 
 // Caminho do seu banco SQLite
-const SQLITE_PATH = path.resolve('src/database/db.sqlite');
+const SQLITE_PATH = path.resolve(process.env.SQLITE_PATH || 'src/database/db.sqlite');
 
 // Configuração do MySQL
 const MYSQL_CONFIG = {
-  host: '127.0.0.1',
-  user: 'root',
-  password: '130178',
-  database: 'sistema_orcamentos',
+  host: process.env.DB_HOST || '127.0.0.1',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '130178',
+  database: process.env.DB_NAME || 'sistema_orcamentos',
+  port: Number(process.env.DB_PORT || 3306),
   multipleStatements: true
 };
 
@@ -63,22 +67,21 @@ async function main() {
     // === CLIENTES ===
     console.log('📦 Migrando tabela clientes...');
     const clientes = await allSqlite('SELECT * FROM clientes');
-    const created_at = normalizeDate(clientes.created_at);
-    const updated_at = normalizeDate(clientes.updated_at);
     for (const c of clientes) {
+      const created_at = normalizeDate(c.created_at);
+      const updated_at = normalizeDate(c.updated_at);
       await mysqlCon.execute(
         `INSERT INTO clientes (id, telefone, nome, etiqueta, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [c.id, c.telefone, c.nome, c.etiqueta, created_at, updated_at, c.created_at,
-      c.updated_at]
+        [c.id, c.telefone, c.nome, c.etiqueta, created_at, updated_at]
       );
     }
 
     // === HISTORICO_MENSAGENS ===
     console.log('💬 Migrando tabela historico_mensagens...');
     const historico = await allSqlite('SELECT * FROM historico_mensagens');
-    const data_envio = normalizeDate(historico.data_envio);
     for (const h of historico) {
+      const data_envio = normalizeDate(h.data_envio);
       await mysqlCon.execute(
         `INSERT INTO historico_mensagens (id, cliente_id, mensagem, tipo, data_envio)
          VALUES (?, ?, ?, ?, ?)`,
@@ -90,6 +93,7 @@ async function main() {
     console.log('🖼️ Migrando tabela imagens...');
     const imagens = await allSqlite('SELECT * FROM imagens');
     for (const im of imagens) {
+      const dataEnvio = normalizeDate(im.data_envio);
       await mysqlCon.execute(
         `INSERT INTO imagens (id, cliente_id, caminho, nome_original, hash, analisada, data_envio, embedding_hash)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -100,9 +104,8 @@ async function main() {
           im.nome_original,
           im.hash,
           im.analisada ?? 0,
-          im.data_envio ?? null,
-          null, // embedding_hash será preenchido depois com FAISS
-          normalizeDate(im.data_envio)
+          dataEnvio,
+          null // embedding_hash será preenchido depois com FAISS
         ]
       );
     }
@@ -111,6 +114,8 @@ async function main() {
     console.log('🏪 Migrando tabela loja_info...');
     const lojas = await allSqlite('SELECT * FROM loja_info');
     for (const l of lojas) {
+      const created_at = normalizeDate(l.created_at);
+      const updated_at = normalizeDate(l.updated_at);
       await mysqlCon.execute(
         `INSERT INTO loja_info (id, nome, descricao, servicos, horario_atendimento, politicas_preco, endereco, telefone, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -123,8 +128,8 @@ async function main() {
           l.politicas_preco,
           l.endereco,
           l.telefone,
-          normalizeDate(l.created_at),
-          normalizeDate(l.updated_at)
+          created_at,
+          updated_at
         ]
       );
     }
@@ -133,6 +138,7 @@ async function main() {
     console.log('📑 Migrando tabela orcamentos...');
     const orcamentos = await allSqlite('SELECT * FROM orcamentos');
     for (const o of orcamentos) {
+      const dataOrcamento = normalizeDate(o.data_orcamento);
       await mysqlCon.execute(
         `INSERT INTO orcamentos (id, cliente_id, imagem_id, valor_estimado, detalhes, status, data_orcamento, embedding_hash)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -143,7 +149,7 @@ async function main() {
           o.valor_estimado ?? null,
           o.detalhes ?? o.details ?? null,
           o.status ?? null,
-          normalizeDate(data_orcamento) ?? null,
+          dataOrcamento,
           null // embedding_hash ainda será definido
         ]
       );
