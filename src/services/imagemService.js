@@ -15,6 +15,10 @@ export async function salvarImagem({
   hash = null,
   embedding = null
 }) {
+  console.log(
+    '[imagemService] Salvando nova imagem:',
+    JSON.stringify({ clienteId, caminho, nomeOriginal, possuiHash: Boolean(hash), possuiEmbedding: Boolean(embedding) })
+  );
   if (!clienteId) {
     throw new Error('clienteId é obrigatório para salvar a imagem.');
   }
@@ -36,11 +40,16 @@ export async function salvarImagem({
     }
   }
 
-  return db('imagens').insert(payload);
+  const resultado = await db('imagens').insert(payload);
+  console.log('[imagemService] Imagem registrada no banco com payload:', payload);
+  return resultado;
 }
 
 export async function listarImagens() {
-  return db('imagens').select('*');
+  console.log('[imagemService] Listando todas as imagens cadastradas.');
+  const imagens = await db('imagens').select('*');
+  console.log(`[imagemService] Total de imagens encontradas: ${imagens.length}.`);
+  return imagens;
 }
 
 export async function obterImagensPorCliente(clienteId, limite = 3) {
@@ -48,8 +57,22 @@ export async function obterImagensPorCliente(clienteId, limite = 3) {
     return [];
   }
 
-  return db('imagens')
+  console.log(
+    `[imagemService] Buscando até ${limite} imagem(ns) para o cliente ${clienteId} para comparação.`
+  );
+
+  const imagens = await db('imagens')
     .where({ cliente_id: clienteId })
     .orderBy('data_envio', 'desc')
     .limit(limite);
+
+  console.log(
+    `[imagemService] ${
+      imagens.length > 0
+        ? `Encontradas ${imagens.length} imagem(ns) para o cliente ${clienteId}.`
+        : 'Nenhuma imagem encontrada para o cliente.'
+    }`
+  );
+
+  return imagens;
 }

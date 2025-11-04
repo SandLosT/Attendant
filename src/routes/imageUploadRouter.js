@@ -33,17 +33,31 @@ router.post('/:telefone', upload.single('imagem'), async (req, res) => {
   const { telefone } = req.params;
   const { file } = req;
 
+  console.log('[imageUploadRouter] Requisição recebida para upload.', {
+    telefone,
+    possuiArquivo: Boolean(file)
+  });
+
   if (!telefone) {
+    console.log('[imageUploadRouter] Telefone ausente na requisição.');
     return res.status(400).json({ error: 'Telefone é obrigatório' });
   }
 
   if (!file) {
+    console.log('[imageUploadRouter] Nenhum arquivo de imagem encontrado no payload.');
     return res.status(400).json({ error: 'Imagem não enviada' });
   }
 
   try {
+    console.log('[imageUploadRouter] Iniciando fluxo de persistência da imagem:', {
+      telefone,
+      nomeOriginal: file.originalname,
+      caminhoTemporario: file.path
+    });
     const cliente = await obterOuCriarCliente(telefone);
+    console.log('[imageUploadRouter] Cliente identificado para upload:', cliente?.id);
     const embedding = await obterEmbeddingDoServico(file.path);
+    console.log('[imageUploadRouter] Embedding calculado com sucesso para a imagem.');
 
     await salvarImagem({
       clienteId: cliente.id,
@@ -51,8 +65,10 @@ router.post('/:telefone', upload.single('imagem'), async (req, res) => {
       nomeOriginal: file.originalname,
       embedding
     });
+    console.log('[imageUploadRouter] Imagem persistida com sucesso no banco de dados.');
 
     const estimativa = await obterEstimativaOrcamentoPorEmbedding(embedding);
+    console.log('[imageUploadRouter] Resposta da estimativa recebida:', estimativa);
     const { orcamento = null, detalhes = [] } = estimativa ?? {};
 
     res.json({
