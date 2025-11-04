@@ -8,16 +8,33 @@ import { obterInfoLoja } from '../services/lojaService.js';
 import { obterImagensPorCliente } from '../services/imagemService.js';
 
 export async function processarMensagem(telefone, mensagem) {
+  console.log(
+    '[processarMensagem] Iniciando processamento da mensagem:',
+    JSON.stringify({ telefone, trechoMensagem: mensagem?.slice(0, 120) })
+  );
   const cliente = await obterOuCriarCliente(telefone);
+  console.log('[processarMensagem] Cliente localizado:', cliente?.id);
   await salvarMensagem(cliente.id, mensagem, 'entrada');
+  console.log('[processarMensagem] Mensagem de entrada registrada no histórico.');
 
   const historico = await obterUltimasMensagens(cliente.id);
+  console.log(
+    `[processarMensagem] Histórico recuperado com ${historico.length} mensagens para o cliente ${cliente.id}.`
+  );
   const loja = await obterInfoLoja();
   if (!loja) {
     throw new Error('Informações da loja não foram configuradas.');
   }
+  console.log('[processarMensagem] Informações da loja carregadas com sucesso.');
 
   const imagens = await obterImagensPorCliente(cliente.id);
+  if (imagens.length > 0) {
+    console.log(
+      `[processarMensagem] Foram encontradas ${imagens.length} imagem(ns) recentes para comparação.`
+    );
+  } else {
+    console.log('[processarMensagem] Nenhuma imagem anterior encontrada para este cliente.');
+  }
 
   const contextoHistorico = historico
     .reverse()
@@ -73,6 +90,8 @@ Não use frases genéricas como "sou uma IA" ou "não tenho essas informações"
 `;
 
   const resposta = await gerarRespostaComImagem(prompt.trim());
+  console.log('[processarMensagem] Resposta gerada pela OpenAI. Persistindo no histórico.');
   await salvarMensagem(cliente.id, resposta, 'resposta');
+  console.log('[processarMensagem] Resposta registrada no histórico. Processo concluído.');
   return resposta;
 }
