@@ -7,9 +7,9 @@ const {
   DB_CLIENT = 'mysql2',
   DB_HOST = '127.0.0.1',
   DB_PORT = '3306',
-  DB_USER = 'root',
-  DB_PASSWORD = '130178',
-  DB_NAME = 'sistema_orcamentos',
+  DB_USER = '',
+  DB_PASSWORD = '',
+  DB_NAME = '',
 } = process.env;
 
 export default {
