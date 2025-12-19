@@ -1,8 +1,9 @@
+import 'dotenv/config';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:21465/api';
-const SESSION = 'teste';
-const TOKEN = '$2b$10$bkWdmllu0arMgfrgWsPUI.pjfCf43.s6QoJY.hU6EOeBVDAj_MM76';
+const API_URL = process.env.WPP_API_URL;
+const SESSION = process.env.WPP_SESSION;
+const TOKEN = process.env.WPP_TOKEN;
 
 export async function enviarMensagem(phone, message) {
   console.log('🧪 Verificando configurações de envio de mensagem...');
