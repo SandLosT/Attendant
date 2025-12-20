@@ -84,7 +84,12 @@ app.post('/webhook', async (req, res) => {
       const saved = saveBase64ToUploads({ base64, mimetype, filename });
       console.log(
         '[webhook] Mídia salva localmente',
-        JSON.stringify({ phone: telefone, messageId, filePath: saved.filePath, relativePath: saved.relativePath })
+        JSON.stringify({
+          phone: telefone,
+          messageId,
+          filePath: saved.filePath,
+          relativePath: saved.relativePath,
+        })
       );
 
       const cliente = await obterOuCriarCliente(telefone);
@@ -108,6 +113,7 @@ app.post('/webhook', async (req, res) => {
           filePath: saved.filePath,
           best_match_score: estimate?.best_match_score,
           threshold_passed: estimate?.threshold_passed,
+          best_match_status_faz: estimate?.best_match_status_faz,
         })
       );
 
@@ -118,8 +124,16 @@ app.post('/webhook', async (req, res) => {
           ? valorNumerico.toFixed(2)
           : valorBruto || '---';
 
+      // ✅ Aceitar status_faz como boolean, número ou string
+      const statusFaz =
+        estimate?.best_match_status_faz === true ||
+        estimate?.best_match_status_faz === 1 ||
+        estimate?.best_match_status_faz === 'true' ||
+        estimate?.best_match_status_faz === '1' ||
+        estimate?.best_match_status_faz === 'faz';
+
       let resposta;
-      if (estimate?.threshold_passed === true && estimate?.best_match_status_faz === true) {
+      if (estimate?.threshold_passed === true && statusFaz) {
         resposta = `Perfeito! Pela foto, conseguimos fazer sim. O orçamento estimado fica em R$ ${valorFormatado} (podendo variar após avaliação presencial). Qual dia você consegue deixar o carro na oficina?`;
       } else {
         resposta =
