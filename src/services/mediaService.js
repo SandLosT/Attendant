@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const uploadDir = path.resolve('src/public/uploads');
+const uploadsRelativeDir = 'uploads';
+const uploadDir = path.resolve(process.cwd(), 'src/public', uploadsRelativeDir);
 
 function ensureUploadDir() {
   if (!fs.existsSync(uploadDir)) {
@@ -40,12 +41,15 @@ export function saveBase64ToUploads({ base64, mimetype, filename }) {
   const extension = inferExtension(mimetype);
   const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
   const finalName = filename || uniqueName;
+
   const filePath = path.join(uploadDir, uniqueName);
+  const relativePath = path.join(uploadsRelativeDir, uniqueName);
 
   fs.writeFileSync(filePath, cleanBase64, { encoding: 'base64' });
 
   return {
     filePath: path.resolve(filePath),
+    relativePath,
     originalName: finalName,
   };
 }

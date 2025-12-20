@@ -1,16 +1,10 @@
 import express from 'express';
 import * as dotenv from 'dotenv';
 import { processarMensagem } from './usecases/processarMensagem.js';
-import {
-  enviarMensagem,
-  downloadMedia,
-} from './services/wppconnectService.js';
+import { enviarMensagem, downloadMedia } from './services/wppconnectService.js';
 import imageUploadRouter from './routes/imageUploadRouter.js';
 import { normalizeWppEvent } from './utils/normalizeWppEvent.js';
-import {
-  obterOuCriarCliente,
-  salvarMensagem,
-} from './services/historicoService.js';
+import { obterOuCriarCliente, salvarMensagem } from './services/historicoService.js';
 import { salvarImagem } from './services/imagemService.js';
 import {
   obterEmbeddingDoServico,
@@ -23,8 +17,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
+
 // Rota de teste
 app.get('/', (req, res) => {
   res.send('Servidor de atendimento IA rodando');
@@ -67,6 +62,14 @@ app.post('/webhook', async (req, res) => {
     }
 
     try {
+      // ✅ Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
+      if (!base64 && !messageId) {
+        const respostaErro =
+          'Não conseguimos processar sua foto agora. Pode reenviar a imagem, por favor?';
+        await enviarMensagem(telefone, respostaErro);
+        return res.sendStatus(200);
+      }
+
       if (!base64) {
         const media = await downloadMedia(messageId);
         base64 = media.base64;
@@ -81,14 +84,15 @@ app.post('/webhook', async (req, res) => {
       const saved = saveBase64ToUploads({ base64, mimetype, filename });
       console.log(
         '[webhook] Mídia salva localmente',
-        JSON.stringify({ phone: telefone, messageId, filePath: saved.filePath })
+        JSON.stringify({ phone: telefone, messageId, filePath: saved.filePath, relativePath: saved.relativePath })
       );
 
       const cliente = await obterOuCriarCliente(telefone);
       await salvarMensagem(cliente.id, '[imagem recebida]', 'entrada');
+
       await salvarImagem({
         clienteId: cliente.id,
-        caminho: saved.filePath,
+        caminho: saved.relativePath, // ✅ salva o caminho relativo no banco
         nomeOriginal: saved.originalName,
       });
 

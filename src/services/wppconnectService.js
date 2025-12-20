@@ -9,30 +9,24 @@ export async function enviarMensagem(phone, message) {
   console.log('🧪 Verificando configurações de envio de mensagem...');
   console.log('✅ API_URL:', API_URL);
   console.log('✅ SESSION:', SESSION);
-  const tokenPareceValido = typeof TOKEN === 'string' && TOKEN.startsWith('$2b$');
-  console.log('✅ TOKEN parece válido:', tokenPareceValido);
   console.log('📤 Enviando mensagem para:', phone);
   console.log('📨 Conteúdo:', message);
 
   try {
     const payload = {
-      phone: Array.isArray(phone) ? phone : [phone],  // array de números
+      phone: Array.isArray(phone) ? phone : [phone],
       isGroup: false,
       isNewsletter: false,
       isLid: false,
       message,
-      options: {},                                 // se precisar de quotedMsg, etc
+      options: {},
     };
 
-    const response = await axios.post(
-      `${API_URL}/${SESSION}/send-message`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${TOKEN}`
-        }
-      }
-    );
+    const response = await axios.post(`${API_URL}/${SESSION}/send-message`, payload, {
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+      },
+    });
 
     console.log('✅ Mensagem enviada com sucesso:', response.data);
     return response.data;
@@ -53,8 +47,8 @@ export async function downloadMedia(messageId) {
       { messageId },
       {
         headers: {
-          Authorization: `Bearer ${TOKEN}`
-        }
+          Authorization: `Bearer ${TOKEN}`,
+        },
       }
     );
 
