@@ -41,6 +41,7 @@ export function saveBase64ToUploads({ base64, mimetype, filename }) {
   const extension = inferExtension(mimetype);
   const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
   const finalName = filename || uniqueName;
+
   const filePath = path.join(uploadDir, uniqueName);
   const relativePath = path.join(uploadsRelativeDir, uniqueName);
 
