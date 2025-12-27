@@ -27,7 +27,13 @@ app.get('/', (req, res) => {
 
 // Webhook real vindo do WPPConnect
 app.post('/webhook', async (req, res) => {
-  console.log('📥 Webhook recebido:', JSON.stringify(req.body, null, 2));
+  console.log('📥 Webhook recebido:', {
+  event: req.body?.event,
+  type: req.body?.type,
+  from: req.body?.from || req.body?.data?.from,
+  hasBase64: Boolean(req.body?.base64 || req.body?.data?.base64),
+  hasMessageId: Boolean(req.body?.messageId || req.body?.data?.messageId || req.body?.id),
+});
 
   const normalized = normalizeWppEvent(req.body);
   console.log('🧹 Evento normalizado:', normalized);
