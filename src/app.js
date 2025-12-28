@@ -7,6 +7,17 @@ import { normalizeWppEvent } from './utils/normalizeWppEvent.js';
 import { obterOuCriarCliente, salvarMensagem } from './services/historicoService.js';
 import { salvarImagem } from './services/imagemService.js';
 import {
+  getAtendimentoByClienteId,
+  getOrCreateAtendimento,
+  setEstado,
+  setEstadoEOrcamento,
+} from './services/atendimentoService.js';
+import {
+  criarOrcamentoParaImagem,
+  setPreferenciaData,
+} from './services/orcamentoService.js';
+import { extrairDataEPeriodo, preReservarSlot } from './services/agendaService.js';
+import {
   obterEmbeddingDoServico,
   obterEstimativaOrcamentoPorEmbedding,
 } from './utils/embedClient.js';
@@ -47,6 +58,50 @@ app.post('/webhook', async (req, res) => {
     }
 
     try {
+      const cliente = await obterOuCriarCliente(telefone);
+      const atendimento = await getAtendimentoByClienteId(cliente.id);
+
+      if (atendimento?.estado === 'AGUARDANDO_DATA') {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        const { data, periodo } = extrairDataEPeriodo(mensagem);
+        if (!data) {
+          const respostaData =
+            'Para confirmar, pode me informar a data desejada no formato dd/mm?';
+          await salvarMensagem(cliente.id, respostaData, 'resposta');
+          await enviarMensagem(telefone, respostaData);
+          return res.sendStatus(200);
+        }
+
+        const reservado = await preReservarSlot(data, periodo);
+        if (reservado) {
+          await setPreferenciaData(atendimento.orcamento_id_atual, {
+            data_preferida: data,
+            periodo_preferido: periodo,
+          });
+          await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
+
+          const respostaConfirmacao = 'Estamos confirmando com o responsável e já te retornamos.';
+          await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
+          await enviarMensagem(telefone, respostaConfirmacao);
+          return res.sendStatus(200);
+        }
+
+        const respostaIndisponivel =
+          'Esse horário não está disponível. Pode tentar outra data ou período?';
+        await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
+        await enviarMensagem(telefone, respostaIndisponivel);
+        return res.sendStatus(200);
+      }
+
+      if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+        const respostaStatus = 'Estamos confirmando com o responsável e já te retornamos.';
+        await salvarMensagem(cliente.id, respostaStatus, 'resposta');
+        await enviarMensagem(telefone, respostaStatus);
+        return res.sendStatus(200);
+      }
+
       const resposta = await processarMensagem(telefone, mensagem);
       await enviarMensagem(telefone, resposta);
       return res.sendStatus(200);
@@ -101,12 +156,13 @@ app.post('/webhook', async (req, res) => {
       const cliente = await obterOuCriarCliente(telefone);
       await salvarMensagem(cliente.id, '[imagem recebida]', 'entrada');
 
-      await salvarImagem({
+      const imagemIds = await salvarImagem({
         clienteId: cliente.id,
         caminho: saved.relativePath, // ✅ salva o caminho relativo no banco
         nomeOriginal: saved.originalName,
       });
 
+      const imagemId = Array.isArray(imagemIds) ? imagemIds[0] : imagemIds;
       const embedding = await obterEmbeddingDoServico(saved.filePath);
       const estimate = await obterEstimativaOrcamentoPorEmbedding(embedding);
 
@@ -144,6 +200,19 @@ app.post('/webhook', async (req, res) => {
       } else {
         resposta =
           'Para esse caso, precisamos que um profissional avalie melhor. Vou encaminhar para o responsável e retornamos em seguida, tudo bem?';
+      }
+
+      const orcamentoId = await criarOrcamentoParaImagem({
+        clienteId: cliente.id,
+        imagemId,
+        estimate,
+      });
+      await getOrCreateAtendimento(cliente.id);
+
+      if (estimate?.threshold_passed === true && statusFaz) {
+        await setEstadoEOrcamento(cliente.id, 'AGUARDANDO_DATA', orcamentoId);
+      } else {
+        await setEstadoEOrcamento(cliente.id, 'AGUARDANDO_APROVACAO_DONO', orcamentoId);
       }
 
       await salvarMensagem(cliente.id, resposta, 'resposta');
