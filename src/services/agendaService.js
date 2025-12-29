@@ -1,10 +1,163 @@
 import { db } from '../database/index.js';
 
+const AGENDA_LIMITE_SEMANAL = Number(process.env.AGENDA_LIMITE_SEMANAL) || 5;
+const AGENDA_CAPACIDADE_PADRAO = Number(process.env.AGENDA_CAPACIDADE_PADRAO) || 3;
+
 function formatDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function parseISODate(isoDate) {
+  if (!isoDate) {
+    return null;
+  }
+
+  const [year, month, day] = isoDate.split('-').map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function toISODate(dateOrString) {
+  if (!dateOrString) {
+    return null;
+  }
+
+  if (dateOrString instanceof Date) {
+    return formatDate(dateOrString);
+  }
+
+  if (typeof dateOrString === 'string') {
+    const isoMatch = dateOrString.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const parsed = parseISODate(isoMatch[0]);
+      return parsed ? formatDate(parsed) : null;
+    }
+
+    const brMatch = dateOrString.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (brMatch) {
+      const parsed = new Date(Number(brMatch[3]), Number(brMatch[2]) - 1, Number(brMatch[1]));
+      return formatDate(parsed);
+    }
+  }
+
+  return null;
+}
+
+function getWeekRange(isoDate) {
+  const parsed = parseISODate(isoDate);
+  if (!parsed) {
+    return null;
+  }
+
+  const dayOfWeek = parsed.getDay();
+  const diffToMonday = (dayOfWeek + 6) % 7;
+  const start = new Date(parsed);
+  start.setDate(parsed.getDate() - diffToMonday);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+
+  return {
+    start: formatDate(start),
+    end: formatDate(end),
+  };
+}
+
+async function ensureSlotExists(data, periodo, capacidadePadrao = AGENDA_CAPACIDADE_PADRAO) {
+  const dataISO = toISODate(data);
+  const periodoNormalizado = normalizarPeriodo(periodo);
+
+  if (!dataISO || !periodoNormalizado) {
+    return null;
+  }
+
+  const existente = await db('agenda_slots')
+    .where({ data: dataISO, periodo: periodoNormalizado })
+    .first();
+
+  if (existente) {
+    return existente;
+  }
+
+  const novoSlot = {
+    data: dataISO,
+    periodo: periodoNormalizado,
+    capacidade: capacidadePadrao,
+    reservados: 0,
+    bloqueado: 0,
+  };
+
+  await db('agenda_slots').insert(novoSlot);
+  return { ...novoSlot, criado: true };
+}
+
+async function countReservadosSemana(isoDate, trx = db) {
+  const range = getWeekRange(isoDate);
+  if (!range) {
+    return 0;
+  }
+
+  const resultado = await trx('agenda_slots')
+    .whereBetween('data', [range.start, range.end])
+    .sum({ total: 'reservados' })
+    .first();
+
+  return Number(resultado?.total || 0);
+}
+
+async function isSemanaCheia(isoDate, trx = db) {
+  const total = await countReservadosSemana(isoDate, trx);
+  return total >= AGENDA_LIMITE_SEMANAL;
+}
+
+async function findProximaVagaAPartir(isoDateStart, periodoPreferido) {
+  const dataInicial = toISODate(isoDateStart);
+  if (!dataInicial) {
+    return null;
+  }
+
+  const periodoNormalizado = normalizarPeriodo(periodoPreferido);
+  const outrosPeriodos = ['MANHA', 'TARDE'];
+  if (periodoNormalizado) {
+    const outro = outrosPeriodos.find((periodo) => periodo !== periodoNormalizado);
+    outrosPeriodos.splice(0, outrosPeriodos.length, periodoNormalizado, outro);
+  }
+
+  let dataAtual = parseISODate(dataInicial);
+
+  for (let i = 0; i < 60 && dataAtual; i += 1) {
+    const dataISO = formatDate(dataAtual);
+    if (await isSemanaCheia(dataISO)) {
+      const range = getWeekRange(dataISO);
+      const proximaSegunda = parseISODate(range.start);
+      proximaSegunda.setDate(proximaSegunda.getDate() + 7);
+      dataAtual = proximaSegunda;
+      continue;
+    }
+
+    for (const periodo of outrosPeriodos) {
+      await ensureSlotExists(dataISO, periodo);
+      const slot = await db('agenda_slots')
+        .where({ data: dataISO, periodo })
+        .first();
+
+      if (slot && slot.bloqueado === 0 && slot.reservados < slot.capacidade) {
+        return { data: dataISO, periodo };
+      }
+    }
+
+    const proximoDia = new Date(dataAtual);
+    proximoDia.setDate(proximoDia.getDate() + 1);
+    dataAtual = proximoDia;
+  }
+
+  return null;
 }
 
 export async function listarSlotsDisponiveis(dias = 14) {
@@ -22,21 +175,53 @@ export async function listarSlotsDisponiveis(dias = 14) {
 }
 
 export async function preReservarSlot(dataYYYYMMDD, periodo) {
+  const dataISO = toISODate(dataYYYYMMDD);
   const periodoNormalizado = normalizarPeriodo(periodo);
 
-  const updated = await db('agenda_slots')
-    .where({ data: dataYYYYMMDD, periodo: periodoNormalizado, bloqueado: 0 })
-    .whereRaw('reservados < capacidade')
-    .update({ reservados: db.raw('reservados + 1') });
+  if (!dataISO || !periodoNormalizado) {
+    return { ok: false, reason: 'SEM_VAGA' };
+  }
 
-  return updated > 0;
+  await ensureSlotExists(dataISO, periodoNormalizado);
+
+  if (await isSemanaCheia(dataISO)) {
+    return { ok: false, reason: 'SEMANA_CHEIA' };
+  }
+
+  return db.transaction(async (trx) => {
+    if (await isSemanaCheia(dataISO, trx)) {
+      return { ok: false, reason: 'SEMANA_CHEIA' };
+    }
+
+    const slot = await trx('agenda_slots')
+      .where({ data: dataISO, periodo: periodoNormalizado })
+      .forUpdate()
+      .first();
+
+    if (!slot || slot.bloqueado || slot.reservados >= slot.capacidade) {
+      return { ok: false, reason: 'SEM_VAGA' };
+    }
+
+    await trx('agenda_slots')
+      .where({ id: slot.id })
+      .update({ reservados: slot.reservados + 1 });
+
+    return { ok: true };
+  });
 }
 
 export async function liberarSlot(dataYYYYMMDD, periodo) {
+  const dataISO = toISODate(dataYYYYMMDD);
   const periodoNormalizado = normalizarPeriodo(periodo);
 
+  if (!dataISO || !periodoNormalizado) {
+    return false;
+  }
+
+  await ensureSlotExists(dataISO, periodoNormalizado);
+
   const updated = await db('agenda_slots')
-    .where({ data: dataYYYYMMDD, periodo: periodoNormalizado, bloqueado: 0 })
+    .where({ data: dataISO, periodo: periodoNormalizado, bloqueado: 0 })
     .where('reservados', '>', 0)
     .update({ reservados: db.raw('reservados - 1') });
 
@@ -44,14 +229,67 @@ export async function liberarSlot(dataYYYYMMDD, periodo) {
 }
 
 export async function confirmarSlot(dataYYYYMMDD, periodo) {
+  const dataISO = toISODate(dataYYYYMMDD);
   const periodoNormalizado = normalizarPeriodo(periodo);
+
+  if (!dataISO || !periodoNormalizado) {
+    return false;
+  }
 
   const slot = await db('agenda_slots')
     .select('id')
-    .where({ data: dataYYYYMMDD, periodo: periodoNormalizado, bloqueado: 0 })
+    .where({ data: dataISO, periodo: periodoNormalizado, bloqueado: 0 })
     .first();
 
   return Boolean(slot);
+}
+
+export async function listarDisponibilidade(from, to) {
+  const fromISO = toISODate(from);
+  const toISO = toISODate(to);
+
+  if (!fromISO || !toISO) {
+    return [];
+  }
+
+  const slots = await db('agenda_slots')
+    .whereBetween('data', [fromISO, toISO])
+    .orderBy('data', 'asc')
+    .orderBy('periodo', 'asc');
+
+  const semanaCheiaPorDia = {};
+  const datas = [...new Set(slots.map((slot) => slot.data))];
+
+  for (const data of datas) {
+    semanaCheiaPorDia[data] = await isSemanaCheia(data);
+  }
+
+  return slots.map((slot) => ({
+    data: slot.data,
+    periodo: slot.periodo,
+    capacidade: slot.capacidade,
+    reservados: slot.reservados,
+    bloqueado: slot.bloqueado,
+    vagas: slot.capacidade - slot.reservados,
+    semana_cheia: semanaCheiaPorDia[slot.data],
+  }));
+}
+
+export async function setBloqueado(dataYYYYMMDD, periodo, bloqueado) {
+  const dataISO = toISODate(dataYYYYMMDD);
+  const periodoNormalizado = normalizarPeriodo(periodo);
+
+  if (!dataISO || !periodoNormalizado) {
+    return false;
+  }
+
+  await ensureSlotExists(dataISO, periodoNormalizado);
+
+  const updated = await db('agenda_slots')
+    .where({ data: dataISO, periodo: periodoNormalizado })
+    .update({ bloqueado: bloqueado ? 1 : 0 });
+
+  return updated > 0;
 }
 
 export function normalizarPeriodo(texto) {
@@ -134,3 +372,10 @@ export function extrairDataEPeriodo(texto) {
 
   return { data: null, periodo };
 }
+
+export {
+  ensureSlotExists,
+  countReservadosSemana,
+  isSemanaCheia,
+  findProximaVagaAPartir,
+};

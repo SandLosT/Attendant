@@ -15,8 +15,15 @@ import {
   isManualAtivo,
   setEstado,
 } from './services/atendimentoService.js';
+
 import { setPreferenciaData } from './services/orcamentoService.js';
-import { extrairDataEPeriodo, preReservarSlot } from './services/agendaService.js';
+
+import {
+  extrairDataEPeriodo,
+  findProximaVagaAPartir,
+  normalizarPeriodo,
+  preReservarSlot,
+} from './services/agendaService.js';
 
 import { handleImagemOrcamentoFlow } from './usecases/handleImagemOrcamentoFlow.js';
 
@@ -24,6 +31,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
 const NOVO_ORCAMENTO_TERMOS = [
   'novo',
   'outro',
@@ -40,16 +48,40 @@ function contemNovoOrcamento(texto = '') {
   return NOVO_ORCAMENTO_TERMOS.some((termo) => textoNormalizado.includes(termo));
 }
 
+function formatarDataBr(isoDate) {
+  if (!isoDate) return '';
+  const [ano, mes, dia] = isoDate.split('-');
+  return `${dia}/${mes}`;
+}
+
+function adicionarDiasISO(isoDate, dias) {
+  const [ano, mes, dia] = isoDate.split('-').map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  data.setDate(data.getDate() + dias);
+  const year = data.getFullYear();
+  const month = String(data.getMonth() + 1).padStart(2, '0');
+  const day = String(data.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Compat: se preReservarSlot retornar boolean (versão antiga),
+ * converte para { ok: boolean }. Se retornar objeto, mantém.
+ */
+function normalizarResultadoReserva(ret) {
+  if (typeof ret === 'boolean') return { ok: ret };
+  if (ret && typeof ret === 'object' && 'ok' in ret) return ret;
+  return { ok: false };
+}
+
 app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
 app.use('/owner', ownerRouter);
 
-// Rota de teste
 app.get('/', (req, res) => {
   res.send('Servidor de atendimento IA rodando');
 });
 
-// Webhook real vindo do WPPConnect
 app.post('/webhook', async (req, res) => {
   console.log('📥 Webhook recebido:', {
     event: req.body?.event,
@@ -77,14 +109,16 @@ app.post('/webhook', async (req, res) => {
 
     try {
       const cliente = await obterOuCriarCliente(telefone);
-      const atendimento = await getOrCreateAtendimento(cliente.id)
+      const atendimento = await getOrCreateAtendimento(cliente.id);
       const modoManualAtivo = isManualAtivo(atendimento);
 
+      // Dono assumiu: bot não responde
       if (modoManualAtivo) {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
         return res.status(200).json({ ok: true, manual: true });
       }
 
+      // Atendimento finalizado: só volta a falar se cliente indicar "novo orçamento"
       if (atendimento?.estado === 'FINALIZADO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
@@ -108,11 +142,14 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Se está aguardando data, interpretamos e pré-reservamos slot
-     if (atendimento?.estado === 'AGUARDANDO_DATA') {
+      // ----------------------------
+      // AGUARDANDO_DATA
+      // ----------------------------
+      if (atendimento?.estado === 'AGUARDANDO_DATA') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
+        const periodoPreferido = normalizarPeriodo(periodo);
 
         if (!data) {
           const respostaData =
@@ -122,24 +159,57 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
-        // ✅ Se o cliente não informou período, tenta MANHA e depois TARDE
-        let reservado = false;
-        let periodoReservado = periodo || null;
+        // Tenta reservar: se o cliente pediu um período, tenta ele e depois o outro; senão tenta MANHA e TARDE
+        const periodosTentativa = periodoPreferido
+          ? [periodoPreferido, periodoPreferido === 'MANHA' ? 'TARDE' : 'MANHA']
+          : ['MANHA', 'TARDE'];
 
-        if (periodoReservado) {
-          reservado = await preReservarSlot(data, periodoReservado);
-        } else {
-          for (const p of ['MANHA', 'TARDE']) {
-            const ok = await preReservarSlot(data, p);
-            if (ok) {
-              reservado = true;
-              periodoReservado = p;
-              break;
+        let periodoReservado = null;
+        let resultadoReserva = null;
+
+        for (const periodoTentativa of periodosTentativa) {
+          const ret = await preReservarSlot(data, periodoTentativa);
+          resultadoReserva = normalizarResultadoReserva(ret);
+
+          if (resultadoReserva.ok) {
+            periodoReservado = periodoTentativa;
+            break;
+          }
+
+          // Semana cheia -> sugere próxima vaga real
+          if (resultadoReserva.reason === 'SEMANA_CHEIA') {
+            const sugestao = await findProximaVagaAPartir(data, periodoPreferido);
+            if (sugestao) {
+              const respostaSemanaCheia = `Essa semana já está completa. A próxima vaga é ${formatarDataBr(
+                sugestao.data
+              )} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`;
+              await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
+              await enviarMensagem(telefone, respostaSemanaCheia);
+              return res.sendStatus(200);
             }
+
+            const respostaSemanaCheia =
+              'Essa semana já está completa 😕. Pode me sugerir outra data?';
+            await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
+            await enviarMensagem(telefone, respostaSemanaCheia);
+            return res.sendStatus(200);
           }
         }
 
-        if (!reservado) {
+        // Não reservou em nenhum período -> tenta sugerir a próxima vaga a partir do dia seguinte
+        if (!resultadoReserva?.ok || !periodoReservado) {
+          const proximaData = adicionarDiasISO(data, 1);
+          const sugestao = await findProximaVagaAPartir(proximaData, periodoPreferido);
+
+          if (sugestao) {
+            const respostaIndisponivel = `Esse horário não está disponível 😕. A próxima vaga é ${formatarDataBr(
+              sugestao.data
+            )} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`;
+            await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
+            await enviarMensagem(telefone, respostaIndisponivel);
+            return res.sendStatus(200);
+          }
+
           const respostaIndisponivel =
             'Esse horário não está disponível 😕. Pode tentar **outra data** ou escolher **manhã/tarde**?';
           await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
@@ -147,6 +217,7 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
+        // Reservou com sucesso
         await setPreferenciaData(atendimento.orcamento_id_atual, {
           data_preferida: data,
           periodo_preferido: periodoReservado,
@@ -154,11 +225,10 @@ app.post('/webhook', async (req, res) => {
 
         await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
-        const periodoTxt =
-          periodoReservado === 'TARDE' ? 'tarde' : 'manhã';
-
-        const respostaConfirmacao =
-          `Perfeito — já pré-reservei ${data} (${periodoTxt}) ✅. Agora estou confirmando com o responsável e já te retorno.`;
+        const periodoTxt = periodoReservado === 'TARDE' ? 'tarde' : 'manhã';
+        const respostaConfirmacao = `Perfeito — já pré-reservei ${formatarDataBr(
+          data
+        )} (${periodoTxt}) ✅. Agora estou confirmando com o responsável e já te retorno.`;
 
         await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
         await enviarMensagem(telefone, respostaConfirmacao);
@@ -166,18 +236,16 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-
-      // Enquanto aguarda aprovação do dono, responde consistente
+      // Enquanto aguarda aprovação do dono
       if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaStatus =
-          'Estamos confirmando com o responsável e já te retornamos.';
+        const respostaStatus = 'Estamos confirmando com o responsável e já te retornamos.';
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
         await enviarMensagem(telefone, respostaStatus);
         return res.sendStatus(200);
       }
 
-      // Fluxo normal (sem state machine)
+      // Fluxo normal
       const resposta = await processarMensagem(telefone, mensagem);
       await enviarMensagem(telefone, resposta);
       return res.sendStatus(200);
@@ -198,9 +266,7 @@ app.post('/webhook', async (req, res) => {
     let filename = normalized.filename;
 
     if (!telefone) {
-      return res
-        .status(400)
-        .json({ erro: 'Telefone ausente no webhook de imagem' });
+      return res.status(400).json({ erro: 'Telefone ausente no webhook de imagem' });
     }
 
     try {
@@ -208,8 +274,10 @@ app.post('/webhook', async (req, res) => {
       const atendimento = await getAtendimentoByClienteId(cliente.id);
       const modoManualAtivo = isManualAtivo(atendimento);
 
+      // Modo manual: registra mas não responde
       if (modoManualAtivo) {
         await salvarMensagem(cliente.id, '[imagem recebida]', 'entrada');
+
         if (!base64 && messageId) {
           const media = await downloadMedia(messageId);
           base64 = media.base64;
@@ -229,11 +297,12 @@ app.post('/webhook', async (req, res) => {
         return res.status(200).json({ ok: true, manual: true });
       }
 
+      // Se estava finalizado e mandou foto, inicia novo ciclo
       if (atendimento?.estado === 'FINALIZADO') {
         await setEstado(cliente.id, 'AGUARDANDO_FOTO');
       }
 
-      // Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
+      // Hardening: precisa base64 ou messageId
       if (!base64 && !messageId) {
         const respostaErro =
           'Não conseguimos processar sua foto agora. Pode reenviar a imagem, por favor?';
@@ -241,7 +310,6 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Se não veio base64, baixa do WPPConnect
       if (!base64) {
         const media = await downloadMedia(messageId);
         base64 = media.base64;
@@ -253,7 +321,6 @@ app.post('/webhook', async (req, res) => {
         throw new Error('Não foi possível obter a mídia (base64 ausente).');
       }
 
-      // Fluxo unificado: salva imagem, estima, cria orçamento/atendimento, grava histórico e retorna resposta
       const resultado = await handleImagemOrcamentoFlow({
         telefone,
         base64,
@@ -271,10 +338,7 @@ app.post('/webhook', async (req, res) => {
       try {
         await enviarMensagem(telefone, respostaErro);
       } catch (sendErr) {
-        console.error(
-          '❌ Falha ao enviar mensagem de erro:',
-          sendErr.message || sendErr
-        );
+        console.error('❌ Falha ao enviar mensagem de erro:', sendErr.message || sendErr);
       }
       return res.status(500).json({ erro: err.message });
     }
@@ -283,7 +347,6 @@ app.post('/webhook', async (req, res) => {
   return res.status(200).json({ info: 'Evento ignorado' });
 });
 
-// Inicia o servidor
 app.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);
 });

@@ -11,11 +11,14 @@ export async function seed(knex) {
     return;
   }
 
+  const diasGerar = Number(process.env.AGENDA_DIAS_GERAR) || 30;
+  const capacidadePadrao = Number(process.env.AGENDA_CAPACIDADE_PADRAO) || 3;
+
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
 
   const slots = [];
-  for (let i = 0; i < 14; i += 1) {
+  for (let i = 0; i < diasGerar; i += 1) {
     const data = new Date(hoje);
     data.setDate(data.getDate() + i);
     const dataFormatada = formatDate(data);
@@ -23,7 +26,7 @@ export async function seed(knex) {
     slots.push({
       data: dataFormatada,
       periodo: 'MANHA',
-      capacidade: 3,
+      capacidade: capacidadePadrao,
       reservados: 0,
       bloqueado: 0,
     });
@@ -31,7 +34,7 @@ export async function seed(knex) {
     slots.push({
       data: dataFormatada,
       periodo: 'TARDE',
-      capacidade: 3,
+      capacidade: capacidadePadrao,
       reservados: 0,
       bloqueado: 0,
     });

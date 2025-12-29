@@ -8,7 +8,12 @@ import {
   setEstado,
   setManual,
 } from '../services/atendimentoService.js';
-import { liberarSlot } from '../services/agendaService.js';
+import {
+  ensureSlotExists,
+  liberarSlot,
+  listarDisponibilidade,
+  setBloqueado,
+} from '../services/agendaService.js';
 import { limparSlotPreReservado } from '../services/orcamentoService.js';
 
 const router = express.Router();
@@ -291,6 +296,74 @@ router.post('/clientes/:clienteId/devolver', async (req, res) => {
   await setAuto(clienteId);
 
   return res.json({ ok: true, modo: 'AUTO' });
+});
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+router.post('/agenda/gerar', async (req, res) => {
+  const { dias, capacidade, a_partir_de } = req.body || {};
+
+  const diasGerar = Number(dias) || Number(process.env.AGENDA_DIAS_GERAR) || 30;
+  const capacidadePadrao =
+    Number(capacidade) || Number(process.env.AGENDA_CAPACIDADE_PADRAO) || 3;
+
+  const inicio = a_partir_de ? new Date(a_partir_de) : new Date();
+  inicio.setHours(0, 0, 0, 0);
+
+  let gerados = 0;
+
+  for (let i = 0; i < diasGerar; i += 1) {
+    const data = new Date(inicio);
+    data.setDate(inicio.getDate() + i);
+    const dataISO = formatDate(data);
+
+    const slotManha = await ensureSlotExists(dataISO, 'MANHA', capacidadePadrao);
+    const slotTarde = await ensureSlotExists(dataISO, 'TARDE', capacidadePadrao);
+
+    if (slotManha?.criado) {
+      gerados += 1;
+    }
+
+    if (slotTarde?.criado) {
+      gerados += 1;
+    }
+  }
+
+  return res.json({ ok: true, gerados });
+});
+
+router.get('/agenda', async (req, res) => {
+  const fromQuery = typeof req.query.from === 'string' ? req.query.from : null;
+  const toQuery = typeof req.query.to === 'string' ? req.query.to : null;
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const limite = new Date(hoje);
+  limite.setDate(limite.getDate() + 14);
+
+  const from = fromQuery || formatDate(hoje);
+  const to = toQuery || formatDate(limite);
+
+  const disponibilidade = await listarDisponibilidade(from, to);
+
+  return res.json({ from, to, slots: disponibilidade });
+});
+
+router.post('/agenda/bloquear', async (req, res) => {
+  const { data, periodo, bloqueado } = req.body || {};
+
+  if (!data || !periodo) {
+    return res.status(400).json({ erro: 'data e periodo são obrigatórios' });
+  }
+
+  const atualizado = await setBloqueado(data, periodo, Boolean(bloqueado));
+
+  return res.json({ ok: atualizado });
 });
 
 export default router;
