@@ -60,36 +60,24 @@ app.post('/webhook', async (req, res) => {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
-        if (!data) {
-          const respostaData =
-            'Para confirmar, pode me informar a data desejada no formato dd/mm?';
-          await salvarMensagem(cliente.id, respostaData, 'resposta');
-          await enviarMensagem(telefone, respostaData);
-          return res.sendStatus(200);
+
+        if (data) {
+          await preReservarSlot(data, periodo);
         }
 
-        const reservado = await preReservarSlot(data, periodo);
-        if (reservado) {
-          if (atendimento.orcamento_id_atual) {
-            await setPreferenciaData(atendimento.orcamento_id_atual, {
-              data_preferida: data,
-              periodo_preferido: periodo,
-            });
-          }
-
-          await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
-
-          const respostaConfirmacao =
-            'Estamos confirmando com o responsável e já te retornamos.';
-          await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
-          await enviarMensagem(telefone, respostaConfirmacao);
-          return res.sendStatus(200);
+        if (atendimento.orcamento_id_atual) {
+          await setPreferenciaData(atendimento.orcamento_id_atual, {
+            data_preferida: data,
+            periodo_preferido: periodo,
+          });
         }
 
-        const respostaIndisponivel =
-          'Esse horário não está disponível. Pode tentar outra data ou período?';
-        await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
-        await enviarMensagem(telefone, respostaIndisponivel);
+        await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
+
+        const respostaConfirmacao =
+          'Estamos confirmando com o responsável e já te retornamos.';
+        await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
+        await enviarMensagem(telefone, respostaConfirmacao);
         return res.sendStatus(200);
       }
 
