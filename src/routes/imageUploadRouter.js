@@ -3,12 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-import { obterOuCriarCliente } from '../services/historicoService.js';
-import { salvarImagem } from '../services/imagemService.js';
-import {
-  obterEmbeddingDoServico,
-  obterEstimativaOrcamentoPorEmbedding
-} from '../utils/embedClient.js';
+import { handleImagemOrcamentoFlow } from '../usecases/handleImagemOrcamentoFlow.js';
 
 const router = express.Router();
 
@@ -49,38 +44,20 @@ router.post('/:telefone', upload.single('imagem'), async (req, res) => {
   }
 
   try {
-    console.log('[imageUploadRouter] Iniciando fluxo de persistência da imagem:', {
+    console.log('[imageUploadRouter] Iniciando fluxo de processamento da imagem:', {
       telefone,
       nomeOriginal: file.originalname,
       caminhoTemporario: file.path
     });
-    const cliente = await obterOuCriarCliente(telefone);
-    console.log('[imageUploadRouter] Cliente identificado para upload:', cliente?.id);
-    const embedding = await obterEmbeddingDoServico(file.path);
-    console.log('[imageUploadRouter] Embedding calculado com sucesso para a imagem.');
-
-    await salvarImagem({
-      clienteId: cliente.id,
-      caminho: file.path,
-      nomeOriginal: file.originalname,
-      embedding
+    const base64 = fs.readFileSync(file.path, { encoding: 'base64' });
+    const resultado = await handleImagemOrcamentoFlow({
+      telefone,
+      base64,
+      mimetype: file.mimetype,
+      filename: file.originalname,
     });
-    console.log('[imageUploadRouter] Imagem persistida com sucesso no banco de dados.');
 
-    const estimativa = await obterEstimativaOrcamentoPorEmbedding(embedding);
-    console.log('[imageUploadRouter] Resposta da estimativa recebida:', estimativa);
-    const { orcamento = null, detalhes = [] } = estimativa ?? {};
-
-    res.json({
-      message: 'Upload realizado com sucesso',
-      file: {
-        nomeOriginal: file.originalname,
-        nomeSalvo: file.filename,
-        caminho: file.path
-      },
-      orcamento,
-      detalhes
-    });
+    res.json(resultado);
   } catch (err) {
     console.error('Erro upload imagem:', err);
     res.status(500).json({ error: 'Erro ao processar upload da imagem' });

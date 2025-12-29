@@ -42,7 +42,7 @@ export async function salvarImagem({
 
   const resultado = await db('imagens').insert(payload);
   console.log('[imagemService] Imagem registrada no banco com payload:', payload);
-  return resultado;
+  return Array.isArray(resultado) ? resultado[0] : resultado;
 }
 
 export async function listarImagens() {
