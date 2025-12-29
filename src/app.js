@@ -56,48 +56,56 @@ app.post('/webhook', async (req, res) => {
     try {
       const cliente = await obterOuCriarCliente(telefone);
       const atendimento = await getAtendimentoByClienteId(cliente.id);
+      const agora = new Date();
+      const modoManualAtivo = atendimento?.modo === 'MANUAL'
+        && (!atendimento?.modo_manual_ate || new Date(atendimento.modo_manual_ate) > agora);
+
+      if (modoManualAtivo) {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+        return res.sendStatus(200);
+      }
 
       // Se está aguardando data, interpretamos e pré-reservamos slot
       if (atendimento?.estado === 'AGUARDANDO_DATA') {
-  await salvarMensagem(cliente.id, mensagem, 'entrada');
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
 
-  const { data, periodo } = extrairDataEPeriodo(mensagem);
+        const { data, periodo } = extrairDataEPeriodo(mensagem);
 
-  // 1) Se não conseguiu extrair data, não avança estado
-  if (!data) {
-    const respostaData =
-      'Para eu reservar direitinho, me informe a data no formato **dd/mm** (ex: 28/12). Se quiser, diga também o período: **manhã** ou **tarde**.';
-    await salvarMensagem(cliente.id, respostaData, 'resposta');
-    await enviarMensagem(telefone, respostaData);
-    return res.sendStatus(200);
-  }
+        // 1) Se não conseguiu extrair data, não avança estado
+        if (!data) {
+          const respostaData =
+            'Para eu reservar direitinho, me informe a data no formato **dd/mm** (ex: 28/12). Se quiser, diga também o período: **manhã** ou **tarde**.';
+          await salvarMensagem(cliente.id, respostaData, 'resposta');
+          await enviarMensagem(telefone, respostaData);
+          return res.sendStatus(200);
+        }
 
-  // 2) Tenta pré-reservar
-  const reservado = await preReservarSlot(data, periodo);
+        // 2) Tenta pré-reservar
+        const reservado = await preReservarSlot(data, periodo);
 
-  if (!reservado) {
-    const respostaIndisponivel =
-      'Esse horário não está disponível 😕. Pode tentar **outra data** ou escolher **manhã/tarde**?';
-    await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
-    await enviarMensagem(telefone, respostaIndisponivel);
-    return res.sendStatus(200);
-  }
+        if (!reservado) {
+          const respostaIndisponivel =
+            'Esse horário não está disponível 😕. Pode tentar **outra data** ou escolher **manhã/tarde**?';
+          await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
+          await enviarMensagem(telefone, respostaIndisponivel);
+          return res.sendStatus(200);
+        }
 
-  // 3) Persistir preferência e avançar estado
-  await setPreferenciaData(atendimento.orcamento_id_atual, {
-    data_preferida: data,
-    periodo_preferido: periodo,
-  });
+        // 3) Persistir preferência e avançar estado
+        await setPreferenciaData(atendimento.orcamento_id_atual, {
+          data_preferida: data,
+          periodo_preferido: periodo,
+        });
 
-  await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
+        await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
-  const respostaConfirmacao =
-    'Perfeito — já pré-reservei aqui ✅. Agora estou confirmando com o responsável e já te retorno.';
-  await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
-  await enviarMensagem(telefone, respostaConfirmacao);
+        const respostaConfirmacao =
+          'Perfeito — já pré-reservei aqui ✅. Agora estou confirmando com o responsável e já te retorno.';
+        await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
+        await enviarMensagem(telefone, respostaConfirmacao);
 
-  return res.sendStatus(200);
-}
+        return res.sendStatus(200);
+      }
 
 
       // Enquanto aguarda aprovação do dono, responde consistente
@@ -137,6 +145,17 @@ app.post('/webhook', async (req, res) => {
     }
 
     try {
+      const cliente = await obterOuCriarCliente(telefone);
+      const atendimento = await getAtendimentoByClienteId(cliente.id);
+      const agora = new Date();
+      const modoManualAtivo = atendimento?.modo === 'MANUAL'
+        && (!atendimento?.modo_manual_ate || new Date(atendimento.modo_manual_ate) > agora);
+
+      if (modoManualAtivo) {
+        await salvarMensagem(cliente.id, '[imagem recebida]', 'entrada');
+        return res.sendStatus(200);
+      }
+
       // Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
       if (!base64 && !messageId) {
         const respostaErro =
