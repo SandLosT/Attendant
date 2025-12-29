@@ -15,7 +15,12 @@ import {
   setEstado,
 } from './services/atendimentoService.js';
 import { setPreferenciaData } from './services/orcamentoService.js';
-import { extrairDataEPeriodo, preReservarSlot } from './services/agendaService.js';
+import {
+  extrairDataEPeriodo,
+  findProximaVagaAPartir,
+  normalizarPeriodo,
+  preReservarSlot,
+} from './services/agendaService.js';
 
 import { handleImagemOrcamentoFlow } from './usecases/handleImagemOrcamentoFlow.js';
 
@@ -37,6 +42,25 @@ const NOVO_ORCAMENTO_TERMOS = [
 function contemNovoOrcamento(texto = '') {
   const textoNormalizado = texto.toLowerCase();
   return NOVO_ORCAMENTO_TERMOS.some((termo) => textoNormalizado.includes(termo));
+}
+
+function formatarDataBr(isoDate) {
+  if (!isoDate) {
+    return '';
+  }
+
+  const [ano, mes, dia] = isoDate.split('-');
+  return `${dia}/${mes}`;
+}
+
+function adicionarDiasISO(isoDate, dias) {
+  const [ano, mes, dia] = isoDate.split('-').map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  data.setDate(data.getDate() + dias);
+  const year = data.getFullYear();
+  const month = String(data.getMonth() + 1).padStart(2, '0');
+  const day = String(data.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 app.use(express.json({ limit: '25mb' }));
@@ -112,6 +136,7 @@ app.post('/webhook', async (req, res) => {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
+        const periodoPreferido = normalizarPeriodo(periodo);
 
         // 1) Se não conseguiu extrair data, não avança estado
         if (!data) {
@@ -123,9 +148,58 @@ app.post('/webhook', async (req, res) => {
         }
 
         // 2) Tenta pré-reservar
-        const reservado = await preReservarSlot(data, periodo);
+        const periodosTentativa = periodoPreferido
+          ? [periodoPreferido, periodoPreferido === 'MANHA' ? 'TARDE' : 'MANHA']
+          : ['MANHA', 'TARDE'];
 
-        if (!reservado) {
+        let reservado = null;
+        let periodoReservado = null;
+
+        for (const periodoTentativa of periodosTentativa) {
+          reservado = await preReservarSlot(data, periodoTentativa);
+          if (reservado.ok) {
+            periodoReservado = periodoTentativa;
+            break;
+          }
+
+          if (reservado.reason === 'SEMANA_CHEIA') {
+            const sugestao = await findProximaVagaAPartir(
+              data,
+              periodoPreferido
+            );
+            if (sugestao) {
+              const respostaSemanaCheia = `Essa semana já está completa. A próxima vaga é ${formatarDataBr(
+                sugestao.data
+              )} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`;
+              await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
+              await enviarMensagem(telefone, respostaSemanaCheia);
+              return res.sendStatus(200);
+            }
+
+            const respostaSemanaCheia =
+              'Essa semana já está completa. Pode me sugerir outra data?';
+            await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
+            await enviarMensagem(telefone, respostaSemanaCheia);
+            return res.sendStatus(200);
+          }
+        }
+
+        if (!reservado?.ok) {
+          const proximaData = adicionarDiasISO(data, 1);
+          const sugestao = await findProximaVagaAPartir(
+            proximaData,
+            periodoPreferido
+          );
+
+          if (sugestao) {
+            const respostaIndisponivel = `Esse horário não está disponível 😕. A próxima vaga é ${formatarDataBr(
+              sugestao.data
+            )} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`;
+            await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
+            await enviarMensagem(telefone, respostaIndisponivel);
+            return res.sendStatus(200);
+          }
+
           const respostaIndisponivel =
             'Esse horário não está disponível 😕. Pode tentar **outra data** ou escolher **manhã/tarde**?';
           await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
@@ -136,7 +210,7 @@ app.post('/webhook', async (req, res) => {
         // 3) Persistir preferência e avançar estado
         await setPreferenciaData(atendimento.orcamento_id_atual, {
           data_preferida: data,
-          periodo_preferido: periodo,
+          periodo_preferido: periodoReservado,
         });
 
         await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
