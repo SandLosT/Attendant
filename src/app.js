@@ -11,6 +11,7 @@ import { saveBase64ToUploads } from './services/mediaService.js';
 
 import {
   getAtendimentoByClienteId,
+  getOrCreateAtendimento,
   isManualAtivo,
   setEstado,
 } from './services/atendimentoService.js';
@@ -76,7 +77,7 @@ app.post('/webhook', async (req, res) => {
 
     try {
       const cliente = await obterOuCriarCliente(telefone);
-      const atendimento = await getAtendimentoByClienteId(cliente.id);
+      const atendimento = await getOrCreateAtendimento(cliente.id)
       const modoManualAtivo = isManualAtivo(atendimento);
 
       if (modoManualAtivo) {
@@ -108,12 +109,11 @@ app.post('/webhook', async (req, res) => {
       }
 
       // Se está aguardando data, interpretamos e pré-reservamos slot
-      if (atendimento?.estado === 'AGUARDANDO_DATA') {
+     if (atendimento?.estado === 'AGUARDANDO_DATA') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
 
-        // 1) Se não conseguiu extrair data, não avança estado
         if (!data) {
           const respostaData =
             'Para eu reservar direitinho, me informe a data no formato **dd/mm** (ex: 28/12). Se quiser, diga também o período: **manhã** ou **tarde**.';
@@ -122,8 +122,22 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
-        // 2) Tenta pré-reservar
-        const reservado = await preReservarSlot(data, periodo);
+        // ✅ Se o cliente não informou período, tenta MANHA e depois TARDE
+        let reservado = false;
+        let periodoReservado = periodo || null;
+
+        if (periodoReservado) {
+          reservado = await preReservarSlot(data, periodoReservado);
+        } else {
+          for (const p of ['MANHA', 'TARDE']) {
+            const ok = await preReservarSlot(data, p);
+            if (ok) {
+              reservado = true;
+              periodoReservado = p;
+              break;
+            }
+          }
+        }
 
         if (!reservado) {
           const respostaIndisponivel =
@@ -133,16 +147,19 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
-        // 3) Persistir preferência e avançar estado
         await setPreferenciaData(atendimento.orcamento_id_atual, {
           data_preferida: data,
-          periodo_preferido: periodo,
+          periodo_preferido: periodoReservado,
         });
 
         await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
+        const periodoTxt =
+          periodoReservado === 'TARDE' ? 'tarde' : 'manhã';
+
         const respostaConfirmacao =
-          'Perfeito — já pré-reservei aqui ✅. Agora estou confirmando com o responsável e já te retorno.';
+          `Perfeito — já pré-reservei ${data} (${periodoTxt}) ✅. Agora estou confirmando com o responsável e já te retorno.`;
+
         await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
         await enviarMensagem(telefone, respostaConfirmacao);
 
