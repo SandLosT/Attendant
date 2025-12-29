@@ -8,6 +8,8 @@ import {
   setEstado,
   setManual,
 } from '../services/atendimentoService.js';
+import { liberarSlot } from '../services/agendaService.js';
+import { limparSlotPreReservado } from '../services/orcamentoService.js';
 
 const router = express.Router();
 
@@ -198,6 +200,11 @@ router.post('/orcamentos/:id/fechar_manual', async (req, res) => {
       detalhes: detalhesAtualizados,
     });
 
+  if (orcamento?.slot_data && orcamento?.slot_periodo && !data_agendada) {
+    await liberarSlot(orcamento.slot_data, orcamento.slot_periodo);
+    await limparSlotPreReservado(id);
+  }
+
   const atendimento = await getAtendimentoByClienteId(orcamento.cliente_id);
 
   if (atendimento) {
@@ -227,6 +234,11 @@ router.post('/orcamentos/:id/recusar', async (req, res) => {
       status: 'RECUSADO',
       recusado_motivo: motivoFinal,
     });
+
+  if (orcamento?.slot_data && orcamento?.slot_periodo) {
+    await liberarSlot(orcamento.slot_data, orcamento.slot_periodo);
+    await limparSlotPreReservado(id);
+  }
 
   await db('atendimentos')
     .where({ cliente_id: orcamento.cliente_id })

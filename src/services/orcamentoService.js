@@ -62,7 +62,21 @@ export async function criarOrcamentoParaImagem({ clienteId, imagemId, estimate }
 export async function setPreferenciaData(orcamentoId, { data_preferida, periodo_preferido }) {
   return db('orcamentos')
     .where({ id: orcamentoId })
-    .update({ data_preferida, periodo_preferido });
+    .update({
+      data_preferida,
+      periodo_preferido,
+      slot_data: data_preferida,
+      slot_periodo: periodo_preferido,
+      slot_reservado_em: db.fn.now(),
+    });
+}
+
+export async function limparSlotPreReservado(orcamentoId) {
+  return db('orcamentos').where({ id: orcamentoId }).update({
+    slot_data: null,
+    slot_periodo: null,
+    slot_reservado_em: null,
+  });
 }
 
 export async function setStatus(orcamentoId, status, extras = {}) {

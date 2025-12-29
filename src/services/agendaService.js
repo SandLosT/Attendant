@@ -32,6 +32,28 @@ export async function preReservarSlot(dataYYYYMMDD, periodo) {
   return updated > 0;
 }
 
+export async function liberarSlot(dataYYYYMMDD, periodo) {
+  const periodoNormalizado = normalizarPeriodo(periodo);
+
+  const updated = await db('agenda_slots')
+    .where({ data: dataYYYYMMDD, periodo: periodoNormalizado, bloqueado: 0 })
+    .where('reservados', '>', 0)
+    .update({ reservados: db.raw('reservados - 1') });
+
+  return updated > 0;
+}
+
+export async function confirmarSlot(dataYYYYMMDD, periodo) {
+  const periodoNormalizado = normalizarPeriodo(periodo);
+
+  const slot = await db('agenda_slots')
+    .select('id')
+    .where({ data: dataYYYYMMDD, periodo: periodoNormalizado, bloqueado: 0 })
+    .first();
+
+  return Boolean(slot);
+}
+
 export function normalizarPeriodo(texto) {
   if (!texto) {
     return null;
