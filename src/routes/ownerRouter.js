@@ -4,8 +4,9 @@ import { enviarMensagem } from '../services/wppconnectService.js';
 import {
   getAtendimentoByClienteId,
   getOrCreateAtendimento,
+  setAuto,
   setEstado,
-  setModo,
+  setManual,
 } from '../services/atendimentoService.js';
 
 const router = express.Router();
@@ -171,21 +172,36 @@ router.post('/orcamentos/:id/fechar_manual', async (req, res) => {
     return res.status(404).json({ erro: 'Orçamento não encontrado' });
   }
 
+  let detalhesAtualizados = orcamento.detalhes;
+  if (observacao) {
+    try {
+      const detalhesJson =
+        typeof orcamento.detalhes === 'string'
+          ? JSON.parse(orcamento.detalhes || '{}')
+          : orcamento.detalhes || {};
+      detalhesAtualizados = JSON.stringify({
+        ...detalhesJson,
+        manual_observacao: observacao,
+      });
+    } catch (error) {
+      detalhesAtualizados = JSON.stringify({ manual_observacao: observacao });
+    }
+  }
+
   await db('orcamentos')
     .where({ id })
     .update({
-      status: 'APROVADO_MANUAL',
+      status: 'FECHADO_MANUAL',
       valor_final: valor_final ?? null,
       data_agendada: data_agendada ?? orcamento.data_agendada ?? null,
       fechado_em: db.fn.now(),
-      fechado_por: 'DONO',
-      observacao: observacao ?? null,
+      detalhes: detalhesAtualizados,
     });
 
   const atendimento = await getAtendimentoByClienteId(orcamento.cliente_id);
 
   if (atendimento) {
-    await setModo(orcamento.cliente_id, 'AUTO');
+    await setAuto(orcamento.cliente_id);
     await setEstado(orcamento.cliente_id, 'FINALIZADO');
   }
 
@@ -237,28 +253,19 @@ router.post('/orcamentos/:id/recusar', async (req, res) => {
 
 router.post('/clientes/:clienteId/interferir', async (req, res) => {
   const { clienteId } = req.params;
-  const { duracao_min } = req.body || {};
-  const duracaoMinutos = Number(duracao_min) || 120;
+  const { minutos, motivo } = req.body || {};
+  const duracaoMinutos = Number(minutos) || 120;
 
-  const atendimento = await getOrCreateAtendimento(clienteId);
-  const agora = Date.now();
-  const expiracao = new Date(agora + duracaoMinutos * 60 * 1000);
+  await getOrCreateAtendimento(clienteId);
 
-  await setModo(clienteId, 'MANUAL', { ate: expiracao, estadoAnterior: atendimento.estado });
-  await setEstado(clienteId, 'HUMANO_ATIVO');
+  const manualAte = await setManual(clienteId, {
+    minutos: duracaoMinutos,
+    motivo: motivo ?? null,
+  });
 
-  const cliente = await db('clientes').where({ id: clienteId }).first();
+  await setEstado(clienteId, 'ESCALADO_HUMANO');
 
-  if (cliente?.telefone) {
-    const mensagem = 'Perfeito, o responsável vai te atender agora.';
-    try {
-      await enviarMensagem(cliente.telefone, mensagem);
-    } catch (error) {
-      console.error('❌ Falha ao enviar WhatsApp:', error.message || error);
-    }
-  }
-
-  return res.json({ ok: true });
+  return res.json({ ok: true, modo: 'MANUAL', manual_ate: manualAte });
 });
 
 router.post('/clientes/:clienteId/devolver', async (req, res) => {
@@ -269,18 +276,21 @@ router.post('/clientes/:clienteId/devolver', async (req, res) => {
     return res.status(404).json({ erro: 'Atendimento não encontrado' });
   }
 
-  const estadoRetorno = atendimento.estado_anterior || 'AGUARDANDO_APROVACAO_DONO';
+  await setAuto(clienteId);
 
-  await setModo(clienteId, 'AUTO');
-  await setEstado(clienteId, estadoRetorno);
-
-  return res.json({ ok: true });
+  return res.json({ ok: true, modo: 'AUTO' });
 });
 
 export default router;
 
 /*
 Exemplos (Windows):
-curl.exe -X POST "http://localhost:3001/owner/clientes/1/interferir" -H "Authorization: Bearer <TOKEN>"
-curl.exe -X POST "http://localhost:3001/owner/orcamentos/1/fechar_manual" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data-raw "{\"valor_final\":450,\"data_agendada\":\"2026-01-10\",\"observacao\":\"Negociado no WhatsApp\"}"
+Interferir:
+curl.exe -X POST http://localhost:3001/owner/clientes/1/interferir -H "Authorization: Bearer dev-token-123" -H "Content-Type: application/json" --data-raw "{\"minutos\":120,\"motivo\":\"avaliar pessoalmente\"}"
+
+Devolver:
+curl.exe -X POST http://localhost:3001/owner/clientes/1/devolver -H "Authorization: Bearer dev-token-123"
+
+Fechar manual:
+curl.exe -X POST http://localhost:3001/owner/orcamentos/1/fechar_manual -H "Authorization: Bearer dev-token-123" -H "Content-Type: application/json" --data-raw "{\"valor_final\":650,\"observacao\":\"fechado via whatsapp\"}"
 */
