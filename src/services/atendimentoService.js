@@ -43,6 +43,41 @@ export async function setEstado(clienteId, estado) {
   return db('atendimentos').where({ cliente_id: clienteId }).update({ estado });
 }
 
+export async function setModo(clienteId, modo, { ate = null, estadoAnterior = null } = {}) {
+  if (!clienteId) {
+    throw new Error('clienteId é obrigatório para ajustar modo do atendimento.');
+  }
+
+  const atendimento = await getAtendimentoByClienteId(clienteId);
+
+  if (!atendimento) {
+    throw new Error('Atendimento não encontrado para ajustar modo.');
+  }
+
+  if (modo === 'MANUAL') {
+    const agora = Date.now();
+    const expiracao = ate ?? new Date(agora + 2 * 60 * 60 * 1000);
+    const estadoAnteriorFinal = estadoAnterior ?? atendimento.estado ?? null;
+
+    return db('atendimentos').where({ cliente_id: clienteId }).update({
+      modo,
+      modo_manual_ate: expiracao,
+      estado_anterior: estadoAnteriorFinal,
+    });
+  }
+
+  return db('atendimentos').where({ cliente_id: clienteId }).update({
+    modo,
+    modo_manual_ate: null,
+    estado_anterior: null,
+  });
+}
+
+export async function getModo(clienteId) {
+  const atendimento = await getAtendimentoByClienteId(clienteId);
+  return atendimento?.modo ?? null;
+}
+
 export async function setOrcamentoAtual(clienteId, orcamentoId) {
   return db('atendimentos')
     .where({ cliente_id: clienteId })
