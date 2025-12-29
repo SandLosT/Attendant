@@ -63,46 +63,41 @@ app.post('/webhook', async (req, res) => {
 
   const { data, periodo } = extrairDataEPeriodo(mensagem);
 
-  // 1) Se não extraiu data, não avança o estado
+  // 1) Se não conseguiu extrair data, não avança estado
   if (!data) {
     const respostaData =
-      'Para confirmar, me diga uma data no formato dd/mm (ex: 28/12). Se preferir, diga também manhã ou tarde.';
+      'Para eu reservar direitinho, me informe a data no formato **dd/mm** (ex: 28/12). Se quiser, diga também o período: **manhã** ou **tarde**.';
     await salvarMensagem(cliente.id, respostaData, 'resposta');
     await enviarMensagem(telefone, respostaData);
     return res.sendStatus(200);
   }
 
-  // 2) Se não veio período, define um padrão (MANHA)
-  const periodoFinal = periodo || 'MANHA';
-
-  // 3) Tenta pré-reservar. Se falhar, não avança o estado
-  const reservado = await preReservarSlot(data, periodoFinal);
+  // 2) Tenta pré-reservar
+  const reservado = await preReservarSlot(data, periodo);
 
   if (!reservado) {
     const respostaIndisponivel =
-      `Esse horário (${data} - ${periodoFinal.toLowerCase()}) não está disponível. ` +
-      'Pode tentar outra data ou período (manhã/tarde)?';
+      'Esse horário não está disponível 😕. Pode tentar **outra data** ou escolher **manhã/tarde**?';
     await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
     await enviarMensagem(telefone, respostaIndisponivel);
     return res.sendStatus(200);
   }
 
-  // 4) Só aqui avança: grava preferência e muda estado
-  if (atendimento.orcamento_id_atual) {
-    await setPreferenciaData(atendimento.orcamento_id_atual, {
-      data_preferida: data,
-      periodo_preferido: periodoFinal,
-    });
-  }
+  // 3) Persistir preferência e avançar estado
+  await setPreferenciaData(atendimento.orcamento_id_atual, {
+    data_preferida: data,
+    periodo_preferido: periodo,
+  });
 
-        await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
+  await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
-        const respostaConfirmacao =
-          'Perfeito! Já pré-agendei aqui. Agora estamos confirmando com o responsável e já te retornamos.';
-        await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
-        await enviarMensagem(telefone, respostaConfirmacao);
-        return res.sendStatus(200);
-      }
+  const respostaConfirmacao =
+    'Perfeito — já pré-reservei aqui ✅. Agora estou confirmando com o responsável e já te retorno.';
+  await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
+  await enviarMensagem(telefone, respostaConfirmacao);
+
+  return res.sendStatus(200);
+}
 
 
       // Enquanto aguarda aprovação do dono, responde consistente
