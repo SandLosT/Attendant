@@ -5,23 +5,12 @@ import { enviarMensagem, downloadMedia } from './services/wppconnectService.js';
 import imageUploadRouter from './routes/imageUploadRouter.js';
 import { normalizeWppEvent } from './utils/normalizeWppEvent.js';
 import { obterOuCriarCliente, salvarMensagem } from './services/historicoService.js';
-import { salvarImagem } from './services/imagemService.js';
-import {
-  getAtendimentoByClienteId,
-  getOrCreateAtendimento,
-  setEstado,
-  setEstadoEOrcamento,
-} from './services/atendimentoService.js';
-import {
-  criarOrcamentoParaImagem,
-  setPreferenciaData,
-} from './services/orcamentoService.js';
+
+import { getAtendimentoByClienteId, setEstado } from './services/atendimentoService.js';
+import { setPreferenciaData } from './services/orcamentoService.js';
 import { extrairDataEPeriodo, preReservarSlot } from './services/agendaService.js';
-import {
-  obterEmbeddingDoServico,
-  obterEstimativaOrcamentoPorEmbedding,
-} from './utils/embedClient.js';
-import { saveBase64ToUploads } from './services/mediaService.js';
+
+import { handleImagemOrcamentoFlow } from './usecases/handleImagemOrcamentoFlow.js';
 
 dotenv.config();
 
@@ -39,16 +28,21 @@ app.get('/', (req, res) => {
 // Webhook real vindo do WPPConnect
 app.post('/webhook', async (req, res) => {
   console.log('📥 Webhook recebido:', {
-  event: req.body?.event,
-  type: req.body?.type,
-  from: req.body?.from || req.body?.data?.from,
-  hasBase64: Boolean(req.body?.base64 || req.body?.data?.base64),
-  hasMessageId: Boolean(req.body?.messageId || req.body?.data?.messageId || req.body?.id),
-});
+    event: req.body?.event,
+    type: req.body?.type,
+    from: req.body?.from || req.body?.data?.from,
+    hasBase64: Boolean(req.body?.base64 || req.body?.data?.base64),
+    hasMessageId: Boolean(
+      req.body?.messageId || req.body?.data?.messageId || req.body?.id
+    ),
+  });
 
   const normalized = normalizeWppEvent(req.body);
   console.log('🧹 Evento normalizado:', normalized);
 
+  // ----------------------------
+  // TEXTO
+  // ----------------------------
   if (normalized.kind === 'text') {
     const telefone = normalized.phone;
     const mensagem = normalized.text;
@@ -61,6 +55,7 @@ app.post('/webhook', async (req, res) => {
       const cliente = await obterOuCriarCliente(telefone);
       const atendimento = await getAtendimentoByClienteId(cliente.id);
 
+      // Se está aguardando data, interpretamos e pré-reservamos slot
       if (atendimento?.estado === 'AGUARDANDO_DATA') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
@@ -75,13 +70,17 @@ app.post('/webhook', async (req, res) => {
 
         const reservado = await preReservarSlot(data, periodo);
         if (reservado) {
-          await setPreferenciaData(atendimento.orcamento_id_atual, {
-            data_preferida: data,
-            periodo_preferido: periodo,
-          });
+          if (atendimento.orcamento_id_atual) {
+            await setPreferenciaData(atendimento.orcamento_id_atual, {
+              data_preferida: data,
+              periodo_preferido: periodo,
+            });
+          }
+
           await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
-          const respostaConfirmacao = 'Estamos confirmando com o responsável e já te retornamos.';
+          const respostaConfirmacao =
+            'Estamos confirmando com o responsável e já te retornamos.';
           await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
           await enviarMensagem(telefone, respostaConfirmacao);
           return res.sendStatus(200);
@@ -94,14 +93,17 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
+      // Enquanto aguarda aprovação do dono, responde consistente
       if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaStatus = 'Estamos confirmando com o responsável e já te retornamos.';
+        const respostaStatus =
+          'Estamos confirmando com o responsável e já te retornamos.';
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
         await enviarMensagem(telefone, respostaStatus);
         return res.sendStatus(200);
       }
 
+      // Fluxo normal (sem state machine)
       const resposta = await processarMensagem(telefone, mensagem);
       await enviarMensagem(telefone, resposta);
       return res.sendStatus(200);
@@ -111,6 +113,9 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
+  // ----------------------------
+  // IMAGEM
+  // ----------------------------
   if (normalized.kind === 'image') {
     const telefone = normalized.phone;
     const messageId = normalized.messageId;
@@ -119,11 +124,13 @@ app.post('/webhook', async (req, res) => {
     let filename = normalized.filename;
 
     if (!telefone) {
-      return res.status(400).json({ erro: 'Telefone ausente no webhook de imagem' });
+      return res
+        .status(400)
+        .json({ erro: 'Telefone ausente no webhook de imagem' });
     }
 
     try {
-      // ✅ Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
+      // Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
       if (!base64 && !messageId) {
         const respostaErro =
           'Não conseguimos processar sua foto agora. Pode reenviar a imagem, por favor?';
@@ -131,6 +138,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
+      // Se não veio base64, baixa do WPPConnect
       if (!base64) {
         const media = await downloadMedia(messageId);
         base64 = media.base64;
@@ -142,82 +150,16 @@ app.post('/webhook', async (req, res) => {
         throw new Error('Não foi possível obter a mídia (base64 ausente).');
       }
 
-      const saved = saveBase64ToUploads({ base64, mimetype, filename });
-      console.log(
-        '[webhook] Mídia salva localmente',
-        JSON.stringify({
-          phone: telefone,
-          messageId,
-          filePath: saved.filePath,
-          relativePath: saved.relativePath,
-        })
-      );
-
-      const cliente = await obterOuCriarCliente(telefone);
-      await salvarMensagem(cliente.id, '[imagem recebida]', 'entrada');
-
-      const imagemIds = await salvarImagem({
-        clienteId: cliente.id,
-        caminho: saved.relativePath, // ✅ salva o caminho relativo no banco
-        nomeOriginal: saved.originalName,
+      // Fluxo unificado: salva imagem, estima, cria orçamento/atendimento, grava histórico e retorna resposta
+      const resultado = await handleImagemOrcamentoFlow({
+        telefone,
+        base64,
+        mimetype,
+        filename,
+        sourceMessageId: messageId,
       });
 
-      const imagemId = Array.isArray(imagemIds) ? imagemIds[0] : imagemIds;
-      const embedding = await obterEmbeddingDoServico(saved.filePath);
-      const estimate = await obterEstimativaOrcamentoPorEmbedding(embedding);
-
-      console.log(
-        '[webhook] Resultado da estimativa',
-        JSON.stringify({
-          phone: telefone,
-          kind: normalized.kind,
-          messageId,
-          filePath: saved.filePath,
-          best_match_score: estimate?.best_match_score,
-          threshold_passed: estimate?.threshold_passed,
-          best_match_status_faz: estimate?.best_match_status_faz,
-        })
-      );
-
-      const valorBruto = estimate?.suggested_value ?? estimate?.best_match_valor_ref;
-      const valorNumerico = Number(valorBruto);
-      const valorFormatado =
-        Number.isFinite(valorNumerico) && !Number.isNaN(valorNumerico)
-          ? valorNumerico.toFixed(2)
-          : valorBruto || '---';
-
-      // ✅ Aceitar status_faz como boolean, número ou string
-      const statusFaz =
-        estimate?.best_match_status_faz === true ||
-        estimate?.best_match_status_faz === 1 ||
-        estimate?.best_match_status_faz === 'true' ||
-        estimate?.best_match_status_faz === '1' ||
-        estimate?.best_match_status_faz === 'faz';
-
-      let resposta;
-      if (estimate?.threshold_passed === true && statusFaz) {
-        resposta = `Perfeito! Pela foto, conseguimos fazer sim. O orçamento estimado fica em R$ ${valorFormatado} (podendo variar após avaliação presencial). Qual dia você consegue deixar o carro na oficina?`;
-      } else {
-        resposta =
-          'Para esse caso, precisamos que um profissional avalie melhor. Vou encaminhar para o responsável e retornamos em seguida, tudo bem?';
-      }
-
-      const orcamentoId = await criarOrcamentoParaImagem({
-        clienteId: cliente.id,
-        imagemId,
-        estimate,
-      });
-      await getOrCreateAtendimento(cliente.id);
-
-      if (estimate?.threshold_passed === true && statusFaz) {
-        await setEstadoEOrcamento(cliente.id, 'AGUARDANDO_DATA', orcamentoId);
-      } else {
-        await setEstadoEOrcamento(cliente.id, 'AGUARDANDO_APROVACAO_DONO', orcamentoId);
-      }
-
-      await salvarMensagem(cliente.id, resposta, 'resposta');
-      await enviarMensagem(telefone, resposta);
-
+      await enviarMensagem(telefone, resultado.resposta);
       return res.sendStatus(200);
     } catch (err) {
       console.error('❌ Erro no fluxo de imagem:', err.message || err);
@@ -226,7 +168,10 @@ app.post('/webhook', async (req, res) => {
       try {
         await enviarMensagem(telefone, respostaErro);
       } catch (sendErr) {
-        console.error('❌ Falha ao enviar mensagem de erro:', sendErr.message || sendErr);
+        console.error(
+          '❌ Falha ao enviar mensagem de erro:',
+          sendErr.message || sendErr
+        );
       }
       return res.status(500).json({ erro: err.message });
     }
