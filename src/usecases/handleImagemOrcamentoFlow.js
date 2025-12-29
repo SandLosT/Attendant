@@ -81,5 +81,12 @@ export async function handleImagemOrcamentoFlow({
 
   await salvarMensagem(cliente.id, resposta, 'resposta');
 
-  return { resposta, estimate, orcamentoId, atendimentoEstado };
+  return {
+    resposta,
+    estimate,
+    orcamentoId,
+    atendimentoEstado,
+    filePath: saved.filePath,
+    relativePath: saved.relativePath,
+  };
 }

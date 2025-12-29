@@ -49,7 +49,7 @@ router.post('/:telefone', upload.single('imagem'), async (req, res) => {
       nomeOriginal: file.originalname,
       caminhoTemporario: file.path
     });
-    const base64 = fs.readFileSync(file.path, { encoding: 'base64' });
+    const base64 = fs.readFileSync(file.path).toString('base64');
     const resultado = await handleImagemOrcamentoFlow({
       telefone,
       base64,
@@ -57,7 +57,12 @@ router.post('/:telefone', upload.single('imagem'), async (req, res) => {
       filename: file.originalname,
     });
 
-    res.json(resultado);
+    res.json({
+      resposta: resultado.resposta,
+      estimate: resultado.estimate,
+      orcamentoId: resultado.orcamentoId,
+      atendimentoEstado: resultado.atendimentoEstado,
+    });
   } catch (err) {
     console.error('Erro upload imagem:', err);
     res.status(500).json({ error: 'Erro ao processar upload da imagem' });

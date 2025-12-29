@@ -25,7 +25,7 @@ export async function seed(knex) {
       periodo: 'MANHA',
       capacidade: 3,
       reservados: 0,
-      bloqueado: false,
+      bloqueado: 0,
     });
 
     slots.push({
@@ -33,7 +33,7 @@ export async function seed(knex) {
       periodo: 'TARDE',
       capacidade: 3,
       reservados: 0,
-      bloqueado: false,
+      bloqueado: 0,
     });
   }
 

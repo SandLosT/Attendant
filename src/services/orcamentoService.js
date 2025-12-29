@@ -41,14 +41,14 @@ export async function criarOrcamentoParaImagem({ clienteId, imagemId, estimate }
   const statusFaz = normalizarStatusFaz(estimate?.best_match_status_faz);
   const valorEstimado =
     thresholdPassed && statusFaz
-      ? estimate?.suggested_value ?? estimate?.best_match_valor_ref
+      ? estimate?.suggested_value || estimate?.best_match_valor_ref
       : null;
 
   const payload = {
     cliente_id: clienteId,
     imagem_id: imagemId ?? null,
     valor_estimado: valorEstimado,
-    status: thresholdPassed && statusFaz ? 'PENDENTE' : 'AGUARDANDO_APROVACAO_DONO',
+    status: 'PENDENTE',
     detalhes: JSON.stringify(estimate ?? {}),
     match_score: estimate?.best_match_score ?? null,
     ref_image_id: resolverRefImageId(estimate),
