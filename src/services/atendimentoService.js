@@ -23,6 +23,7 @@ export async function getOrCreateAtendimento(clienteId) {
     const ids = await db('atendimentos').insert({
       cliente_id: clienteId,
       estado: 'AGUARDANDO_FOTO',
+      modo: 'AUTO',
       orcamento_id_atual: null,
     });
 

@@ -23,6 +23,21 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const NOVO_ORCAMENTO_TERMOS = [
+  'novo',
+  'outro',
+  'orçamento',
+  'orcamento',
+  'foto',
+  'amassado',
+  'cotação',
+  'cotacao',
+];
+
+function contemNovoOrcamento(texto = '') {
+  const textoNormalizado = texto.toLowerCase();
+  return NOVO_ORCAMENTO_TERMOS.some((termo) => textoNormalizado.includes(termo));
+}
 
 app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
@@ -67,6 +82,29 @@ app.post('/webhook', async (req, res) => {
       if (modoManualAtivo) {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
         return res.status(200).json({ ok: true, manual: true });
+      }
+
+      if (atendimento?.estado === 'FINALIZADO') {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        if (contemNovoOrcamento(mensagem)) {
+          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
+          const respostaNovoOrcamento =
+            'Perfeito! Me envie uma foto do amassado e me diga qual parte do carro é (porta, paralama, capô etc.) que eu faço uma estimativa.';
+          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
+          await enviarMensagem(telefone, respostaNovoOrcamento);
+        }
+
+        return res.sendStatus(200);
+      }
+
+      if (atendimento?.estado === 'AGUARDANDO_FOTO') {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+        const respostaFoto =
+          'Para eu estimar o orçamento, me envie uma foto do amassado e, se possível, diga qual parte do carro é (porta, paralama, capô etc.).';
+        await salvarMensagem(cliente.id, respostaFoto, 'resposta');
+        await enviarMensagem(telefone, respostaFoto);
+        return res.sendStatus(200);
       }
 
       // Se está aguardando data, interpretamos e pré-reservamos slot
@@ -174,6 +212,10 @@ app.post('/webhook', async (req, res) => {
         return res.status(200).json({ ok: true, manual: true });
       }
 
+      if (atendimento?.estado === 'FINALIZADO') {
+        await setEstado(cliente.id, 'AGUARDANDO_FOTO');
+      }
+
       // Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
       if (!base64 && !messageId) {
         const respostaErro =
@@ -228,3 +270,10 @@ app.post('/webhook', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);
 });
+
+/*
+Testes manuais:
+1) Fechar manual → cliente manda “oi” → bot fica mudo.
+2) Cliente manda “novo orçamento” → bot pede foto.
+3) Cliente manda foto → pipeline roda.
+*/
