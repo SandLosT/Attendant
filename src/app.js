@@ -6,8 +6,14 @@ import imageUploadRouter from './routes/imageUploadRouter.js';
 import ownerRouter from './routes/ownerRouter.js';
 import { normalizeWppEvent } from './utils/normalizeWppEvent.js';
 import { obterOuCriarCliente, salvarMensagem } from './services/historicoService.js';
+import { salvarImagem } from './services/imagemService.js';
+import { saveBase64ToUploads } from './services/mediaService.js';
 
-import { getAtendimentoByClienteId, setEstado } from './services/atendimentoService.js';
+import {
+  getAtendimentoByClienteId,
+  isManualAtivo,
+  setEstado,
+} from './services/atendimentoService.js';
 import { setPreferenciaData } from './services/orcamentoService.js';
 import { extrairDataEPeriodo, preReservarSlot } from './services/agendaService.js';
 
@@ -56,13 +62,11 @@ app.post('/webhook', async (req, res) => {
     try {
       const cliente = await obterOuCriarCliente(telefone);
       const atendimento = await getAtendimentoByClienteId(cliente.id);
-      const agora = new Date();
-      const modoManualAtivo = atendimento?.modo === 'MANUAL'
-        && (!atendimento?.modo_manual_ate || new Date(atendimento.modo_manual_ate) > agora);
+      const modoManualAtivo = isManualAtivo(atendimento);
 
       if (modoManualAtivo) {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        return res.sendStatus(200);
+        return res.status(200).json({ ok: true, manual: true });
       }
 
       // Se está aguardando data, interpretamos e pré-reservamos slot
@@ -147,13 +151,27 @@ app.post('/webhook', async (req, res) => {
     try {
       const cliente = await obterOuCriarCliente(telefone);
       const atendimento = await getAtendimentoByClienteId(cliente.id);
-      const agora = new Date();
-      const modoManualAtivo = atendimento?.modo === 'MANUAL'
-        && (!atendimento?.modo_manual_ate || new Date(atendimento.modo_manual_ate) > agora);
+      const modoManualAtivo = isManualAtivo(atendimento);
 
       if (modoManualAtivo) {
         await salvarMensagem(cliente.id, '[imagem recebida]', 'entrada');
-        return res.sendStatus(200);
+        if (!base64 && messageId) {
+          const media = await downloadMedia(messageId);
+          base64 = media.base64;
+          mimetype = mimetype || media.mimetype;
+          filename = filename || media.filename;
+        }
+
+        if (base64) {
+          const saved = saveBase64ToUploads({ base64, mimetype, filename });
+          await salvarImagem({
+            clienteId: cliente.id,
+            caminho: saved.relativePath,
+            nomeOriginal: saved.originalName,
+          });
+        }
+
+        return res.status(200).json({ ok: true, manual: true });
       }
 
       // Hardening: se não veio base64 e não veio messageId, não tem como baixar mídia
