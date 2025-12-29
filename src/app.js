@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { processarMensagem } from './usecases/processarMensagem.js';
 import { enviarMensagem, downloadMedia } from './services/wppconnectService.js';
 import imageUploadRouter from './routes/imageUploadRouter.js';
+import ownerRouter from './routes/ownerRouter.js';
 import { normalizeWppEvent } from './utils/normalizeWppEvent.js';
 import { obterOuCriarCliente, salvarMensagem } from './services/historicoService.js';
 
@@ -19,6 +20,7 @@ const PORT = process.env.PORT || 3001;
 
 app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
+app.use('/owner', ownerRouter);
 
 // Rota de teste
 app.get('/', (req, res) => {
