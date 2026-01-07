@@ -16,6 +16,13 @@ function extractFromCandidates(candidates = []) {
 
 export function normalizeWppEvent(body) {
   const eventData = body?.data || body || {};
+  const rawFromMe =
+    eventData.fromMe ??
+    eventData?.key?.fromMe ??
+    body?.fromMe ??
+    body?.data?.fromMe ??
+    body?.data?.key?.fromMe;
+  const fromMe = typeof rawFromMe === 'boolean' ? rawFromMe : undefined;
   const phone = extractFromCandidates([
     eventData.from,
     eventData.sender?.id,
@@ -24,7 +31,14 @@ export function normalizeWppEvent(body) {
     eventData?.key?.remoteJid,
   ]);
 
-  const messageId = eventData.id || eventData.messageId || eventData?.key?.id;
+  const messageId =
+    eventData.id ||
+    eventData.messageId ||
+    body?.messageId ||
+    body?.id ||
+    body?.data?.id ||
+    body?.data?.messageId ||
+    eventData?.key?.id;
   const mimetype = eventData.mimetype || eventData.mimeType;
   const filename = eventData.filename || eventData.fileName;
   const hasImageType =
@@ -41,6 +55,7 @@ export function normalizeWppEvent(body) {
       kind: 'image',
       text,
       messageId,
+      fromMe,
       mimetype,
       base64,
       filename,
@@ -53,6 +68,7 @@ export function normalizeWppEvent(body) {
       kind: 'text',
       text: text.trim(),
       messageId,
+      fromMe,
     };
   }
 
@@ -60,5 +76,6 @@ export function normalizeWppEvent(body) {
     phone,
     kind: 'other',
     messageId,
+    fromMe,
   };
 }

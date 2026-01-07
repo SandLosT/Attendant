@@ -1,6 +1,7 @@
 import { db } from '../database/index.js';
 
 const AGENDA_LIMITE_SEMANAL = Number(process.env.AGENDA_LIMITE_SEMANAL) || 5;
+const AGENDA_LOOKAHEAD_DIAS = Number(process.env.AGENDA_LOOKAHEAD_DIAS) || 30;
 const AGENDA_CAPACIDADE_PADRAO = Number(process.env.AGENDA_CAPACIDADE_PADRAO) || 3;
 
 function formatDate(date) {
@@ -123,32 +124,32 @@ async function findProximaVagaAPartir(isoDateStart, periodoPreferido) {
   }
 
   const periodoNormalizado = normalizarPeriodo(periodoPreferido);
-  const outrosPeriodos = ['MANHA', 'TARDE'];
+  const periodosTentativa = ['MANHA', 'TARDE'];
   if (periodoNormalizado) {
-    const outro = outrosPeriodos.find((periodo) => periodo !== periodoNormalizado);
-    outrosPeriodos.splice(0, outrosPeriodos.length, periodoNormalizado, outro);
+    const outro = periodosTentativa.find((periodo) => periodo !== periodoNormalizado);
+    periodosTentativa.splice(0, periodosTentativa.length, periodoNormalizado, outro);
   }
 
   let dataAtual = parseISODate(dataInicial);
 
-  for (let i = 0; i < 60 && dataAtual; i += 1) {
+  if (AGENDA_LOOKAHEAD_DIAS <= 0) {
+    return null;
+  }
+
+  for (let i = 0; i < AGENDA_LOOKAHEAD_DIAS && dataAtual; i += 1) {
     const dataISO = formatDate(dataAtual);
-    if (await isSemanaCheia(dataISO)) {
-      const range = getWeekRange(dataISO);
-      const proximaSegunda = parseISODate(range.start);
-      proximaSegunda.setDate(proximaSegunda.getDate() + 7);
-      dataAtual = proximaSegunda;
-      continue;
-    }
+    const semanaCheia = await isSemanaCheia(dataISO);
 
-    for (const periodo of outrosPeriodos) {
-      await ensureSlotExists(dataISO, periodo);
-      const slot = await db('agenda_slots')
-        .where({ data: dataISO, periodo })
-        .first();
+    if (!semanaCheia) {
+      for (const periodo of periodosTentativa) {
+        await ensureSlotExists(dataISO, periodo);
+        const slot = await db('agenda_slots')
+          .where({ data: dataISO, periodo })
+          .first();
 
-      if (slot && slot.bloqueado === 0 && slot.reservados < slot.capacidade) {
-        return { data: dataISO, periodo };
+        if (slot && slot.bloqueado === 0 && slot.reservados < slot.capacidade) {
+          return { data: dataISO, periodo };
+        }
       }
     }
 
@@ -179,7 +180,7 @@ export async function preReservarSlot(dataYYYYMMDD, periodo) {
   const periodoNormalizado = normalizarPeriodo(periodo);
 
   if (!dataISO || !periodoNormalizado) {
-    return { ok: false, reason: 'SEM_VAGA' };
+    return { ok: false, reason: 'INDISPONIVEL' };
   }
 
   await ensureSlotExists(dataISO, periodoNormalizado);
@@ -199,7 +200,7 @@ export async function preReservarSlot(dataYYYYMMDD, periodo) {
       .first();
 
     if (!slot || slot.bloqueado || slot.reservados >= slot.capacidade) {
-      return { ok: false, reason: 'SEM_VAGA' };
+      return { ok: false, reason: 'INDISPONIVEL' };
     }
 
     await trx('agenda_slots')

@@ -49,11 +49,11 @@ export function isManualAtivo(atendimento) {
     return false;
   }
 
-  if (!atendimento.manual_ate) {
+  if (!atendimento.modo_manual_ate) {
     return true;
   }
 
-  return new Date(atendimento.manual_ate) > new Date();
+  return new Date(atendimento.modo_manual_ate) > new Date();
 }
 
 export async function setManual(clienteId, { minutos = 120, motivo = null } = {}) {
@@ -72,7 +72,7 @@ export async function setManual(clienteId, { minutos = 120, motivo = null } = {}
 
   await db('atendimentos').where({ cliente_id: clienteId }).update({
     modo: 'MANUAL',
-    manual_ate: manualAte,
+    modo_manual_ate: manualAte,
     manual_motivo: motivo,
   });
 
@@ -92,7 +92,7 @@ export async function setAuto(clienteId) {
 
   return db('atendimentos').where({ cliente_id: clienteId }).update({
     modo: 'AUTO',
-    manual_ate: null,
+    modo_manual_ate: null,
     manual_motivo: null,
   });
 }
@@ -114,14 +114,14 @@ export async function setModo(clienteId, modo, { ate = null, motivo = null } = {
 
     return db('atendimentos').where({ cliente_id: clienteId }).update({
       modo,
-      manual_ate: expiracao,
+      modo_manual_ate: expiracao,
       manual_motivo: motivo,
     });
   }
 
   return db('atendimentos').where({ cliente_id: clienteId }).update({
     modo,
-    manual_ate: null,
+    modo_manual_ate: null,
     manual_motivo: null,
   });
 }

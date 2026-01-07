@@ -282,7 +282,7 @@ router.post('/clientes/:clienteId/interferir', async (req, res) => {
 
   await setEstado(clienteId, 'ESCALADO_HUMANO');
 
-  return res.json({ ok: true, modo: 'MANUAL', manual_ate: manualAte });
+  return res.json({ ok: true, modo: 'MANUAL', modo_manual_ate: manualAte });
 });
 
 router.post('/clientes/:clienteId/devolver', async (req, res) => {
