@@ -27,6 +27,7 @@ import {
 } from './services/agendaService.js';
 
 import { handleImagemOrcamentoFlow } from './usecases/handleImagemOrcamentoFlow.js';
+import gerarRespostaAssistente from './usecases/gerarRespostaAssistente.js';
 
 dotenv.config();
 
@@ -159,10 +160,21 @@ app.post('/webhook', async (req, res) => {
 
         if (contemNovoOrcamento(mensagem)) {
           await setEstado(cliente.id, 'AGUARDANDO_FOTO');
-          const respostaNovoOrcamento =
-            'Perfeito! Me envie uma foto do amassado e me diga qual parte do carro é (porta, paralama, capô etc.) que eu faço uma estimativa.';
+          const respostaNovoOrcamento = await gerarRespostaAssistente({
+            estado: 'AGUARDANDO_FOTO',
+            mensagem,
+            cliente,
+          });
           await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
           await enviarMensagem(telefone, respostaNovoOrcamento);
+        } else {
+          const respostaFinalizado = await gerarRespostaAssistente({
+            estado: 'FINALIZADO',
+            mensagem,
+            cliente,
+          });
+          await salvarMensagem(cliente.id, respostaFinalizado, 'resposta');
+          await enviarMensagem(telefone, respostaFinalizado);
         }
 
         return res.sendStatus(200);
@@ -170,8 +182,11 @@ app.post('/webhook', async (req, res) => {
 
       if (atendimento?.estado === 'AGUARDANDO_FOTO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaFoto =
-          'Para eu estimar o orçamento, me envie uma foto do amassado e, se possível, diga qual parte do carro é (porta, paralama, capô etc.).';
+        const respostaFoto = await gerarRespostaAssistente({
+          estado: 'AGUARDANDO_FOTO',
+          mensagem,
+          cliente,
+        });
         await salvarMensagem(cliente.id, respostaFoto, 'resposta');
         await enviarMensagem(telefone, respostaFoto);
         return res.sendStatus(200);
@@ -187,8 +202,11 @@ app.post('/webhook', async (req, res) => {
         const periodoPreferido = normalizarPeriodo(periodo);
 
         if (!data) {
-          const respostaData =
-            'Para eu reservar direitinho, me informe a data no formato **dd/mm** (ex: 28/12). Se quiser, diga também o período: **manhã** ou **tarde**.';
+          const respostaData = await gerarRespostaAssistente({
+            estado: 'AGUARDANDO_DATA_SEM_DATA',
+            mensagem,
+            cliente,
+          });
           await salvarMensagem(cliente.id, respostaData, 'resposta');
           await enviarMensagem(telefone, respostaData);
           return res.sendStatus(200);
@@ -274,7 +292,11 @@ app.post('/webhook', async (req, res) => {
       // Enquanto aguarda aprovação do dono
       if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaStatus = 'Estamos confirmando com o responsável e já te retornamos.';
+        const respostaStatus = await gerarRespostaAssistente({
+          estado: 'AGUARDANDO_APROVACAO_DONO',
+          mensagem,
+          cliente,
+        });
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
         await enviarMensagem(telefone, respostaStatus);
         return res.sendStatus(200);
