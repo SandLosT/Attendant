@@ -60,15 +60,25 @@ export async function criarOrcamentoParaImagem({ clienteId, imagemId, estimate }
 }
 
 export async function setPreferenciaData(orcamentoId, { data_preferida, periodo_preferido }) {
-  return db('orcamentos')
-    .where({ id: orcamentoId })
-    .update({
-      data_preferida,
-      periodo_preferido,
-      slot_data: data_preferida,
-      slot_periodo: periodo_preferido,
-      slot_reservado_em: db.fn.now(),
-    });
+  const updates = {};
+
+  if (data_preferida !== null && data_preferida !== undefined) {
+    updates.data_preferida = data_preferida;
+    updates.slot_data = data_preferida;
+  }
+
+  if (periodo_preferido !== null && periodo_preferido !== undefined) {
+    updates.periodo_preferido = periodo_preferido;
+    updates.slot_periodo = periodo_preferido;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return 0;
+  }
+
+  updates.slot_reservado_em = db.fn.now();
+
+  return db('orcamentos').where({ id: orcamentoId }).update(updates);
 }
 
 export async function limparSlotPreReservado(orcamentoId) {

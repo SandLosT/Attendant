@@ -4,6 +4,7 @@ import { processarMensagem } from './usecases/processarMensagem.js';
 import { enviarMensagem, downloadMedia } from './services/wppconnectService.js';
 import imageUploadRouter from './routes/imageUploadRouter.js';
 import ownerRouter from './routes/ownerRouter.js';
+import ownerAgendaRouter from './routes/ownerAgendaRouter.js';
 import { normalizeWppEvent } from './utils/normalizeWppEvent.js';
 import { obterOuCriarCliente, salvarMensagem } from './services/historicoService.js';
 import { salvarImagem } from './services/imagemService.js';
@@ -31,6 +32,8 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const WEBHOOK_DEDUPE_TTL_MS = Number(process.env.WEBHOOK_DEDUPE_TTL_MS) || 120000;
+const webhookDedupe = new Map();
 
 const NOVO_ORCAMENTO_TERMOS = [
   'novo',
@@ -69,13 +72,21 @@ function adicionarDiasISO(isoDate, dias) {
  * converte para { ok: boolean }. Se retornar objeto, mantém.
  */
 function normalizarResultadoReserva(ret) {
-  if (typeof ret === 'boolean') return { ok: ret };
-  if (ret && typeof ret === 'object' && 'ok' in ret) return ret;
+  if (typeof ret === 'boolean') {
+    return ret ? { ok: true } : { ok: false, reason: 'INDISPONIVEL' };
+  }
+  if (ret && typeof ret === 'object' && 'ok' in ret) {
+    if (ret.ok) {
+      return ret;
+    }
+    return { ...ret, reason: ret.reason || 'INDISPONIVEL' };
+  }
   return { ok: false };
 }
 
 app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
+app.use('/owner/agenda', ownerAgendaRouter);
 app.use('/owner', ownerRouter);
 
 app.get('/', (req, res) => {
@@ -95,6 +106,24 @@ app.post('/webhook', async (req, res) => {
 
   const normalized = normalizeWppEvent(req.body);
   console.log('🧹 Evento normalizado:', normalized);
+  if (normalized.fromMe === true) {
+    return res.sendStatus(200);
+  }
+
+  const now = Date.now();
+  for (const [key, timestamp] of webhookDedupe.entries()) {
+    if (now - timestamp > WEBHOOK_DEDUPE_TTL_MS) {
+      webhookDedupe.delete(key);
+    }
+  }
+
+  if (normalized.messageId) {
+    const lastSeen = webhookDedupe.get(normalized.messageId);
+    if (lastSeen && now - lastSeen < WEBHOOK_DEDUPE_TTL_MS) {
+      return res.sendStatus(200);
+    }
+    webhookDedupe.set(normalized.messageId, now);
+  }
 
   // ✅ Evita loop: ignora mensagens enviadas pelo próprio WhatsApp da sessão (fromMe)
   if (normalized.fromMe) {
