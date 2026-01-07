@@ -96,6 +96,12 @@ app.post('/webhook', async (req, res) => {
   const normalized = normalizeWppEvent(req.body);
   console.log('🧹 Evento normalizado:', normalized);
 
+  // ✅ Evita loop: ignora mensagens enviadas pelo próprio WhatsApp da sessão (fromMe)
+  if (normalized.fromMe) {
+    return res.status(200).json({ ok: true, ignored: true, reason: 'fromMe' });
+  }
+
+
   // ----------------------------
   // TEXTO
   // ----------------------------
