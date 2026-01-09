@@ -115,3 +115,26 @@ Cliente (${telefone || 'sem telefone informado'}): "${mensagem || ''}"
     return respostaHumanaFallback();
   }
 }
+
+export async function gerarRespostaChat({ messages = [], fallback = '' } = {}) {
+  if (!hasOpenAIKey()) {
+    return fallback;
+  }
+
+  const openai = getOpenAIClient();
+  if (!openai) {
+    return fallback;
+  }
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: getOpenAIModel(),
+      messages,
+      temperature: getOpenAITemperature(),
+    });
+    return completion.choices[0].message.content.trim();
+  } catch (err) {
+    console.error('Erro na OpenAI:', err);
+    return fallback;
+  }
+}
