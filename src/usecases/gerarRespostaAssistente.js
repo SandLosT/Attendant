@@ -1,137 +1,90 @@
-import dotenv from 'dotenv';
+import { gerarRespostaChat } from '../services/openaiService.js';
 
-dotenv.config();
+function montarFallback(objetivo = '', dados = {}) {
+  const objetivoNormalizado = objetivo.toLowerCase();
+  const dataBr = dados?.dataBr || '';
+  const periodoTxt = dados?.periodoTxt || '';
 
-const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
-const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
-const OPENAI_DEFAULT_TEMPERATURE = 0.6;
-
-const FALLBACKS = {
-  AGUARDANDO_FOTO:
-    'Me manda uma foto do amassado e, se puder, me diz qual parte do carro é 🙂',
-  AGUARDANDO_APROVACAO_DONO:
-    'Beleza! Estou confirmando com o responsável e já te retorno.',
-  FINALIZADO:
-    'Perfeito 🙂 Se quiser um novo orçamento, é só me mandar uma foto do amassado.',
-  AGUARDANDO_DATA_SEM_DATA:
-    'Pra eu reservar certinho, me diga a data (dd/mm) e se prefere manhã ou tarde.',
-};
-
-const OBJECTIVES = {
-  AGUARDANDO_FOTO:
-    'Pedir UMA foto do amassado e, se possível, qual parte do carro. Ser simpático e direto.',
-  AGUARDANDO_APROVACAO_DONO:
-    'Avisar que está aguardando confirmação do responsável e que já retorna. Não pedir mais informações.',
-  FINALIZADO:
-    'Responder algo curto e educado. Se a mensagem indicar novo orçamento, orientar a mandar foto.',
-  AGUARDANDO_DATA_SEM_DATA:
-    'Pedir a data no formato dd/mm e perguntar se prefere manhã ou tarde de forma humana.',
-};
-
-function getEnvNumber(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function formatExtras(extras) {
-  if (!extras || typeof extras !== 'object') {
-    return '';
+  if (objetivoNormalizado.includes('pedir foto')) {
+    return 'Pode me enviar uma foto do carro e indicar qual parte precisa de reparo?';
   }
 
-  const entries = Object.entries(extras).filter(
-    ([, value]) => value !== undefined && value !== null && value !== ''
-  );
-
-  if (entries.length === 0) {
-    return '';
+  if (objetivoNormalizado.includes('pedir data')) {
+    return 'Qual a data (dd/mm)? Se quiser, pode dizer manhã ou tarde.';
   }
 
-  return entries.map(([key, value]) => `${key}: ${value}`).join('\n');
-}
+  if (objetivoNormalizado.includes('confirmar pré-reserva')) {
+    if (dataBr) {
+      const periodo = periodoTxt ? ` (${periodoTxt})` : '';
+      return `Perfeito, pré-reservei ${dataBr}${periodo}. Vou confirmar com o responsável e já te retorno.`;
+    }
+    return 'Perfeito, já pré-reservei e vou confirmar com o responsável para te responder.';
+  }
 
-function getFallback(estado) {
-  return FALLBACKS[estado] || FALLBACKS.FINALIZADO;
-}
+  if (objetivoNormalizado.includes('aguardando dono')) {
+    return 'Estou aguardando a confirmação do responsável e já te retorno.';
+  }
 
-function buildUserPrompt({ estado, mensagem, cliente, extras }) {
-  const objective = OBJECTIVES[estado] || OBJECTIVES.FINALIZADO;
-  const extrasText = formatExtras(extras);
+  if (objetivoNormalizado.includes('sugerir próxima vaga')) {
+    if (dataBr) {
+      const periodo = periodoTxt ? ` (${periodoTxt})` : '';
+      return `A próxima vaga é ${dataBr}${periodo}. Pode ser?`;
+    }
+    return 'A próxima vaga disponível é em outra data. Pode sugerir uma data que funcione?';
+  }
 
-  return [
-    `Estado do atendimento: ${estado}`,
-    `Objetivo: ${objective}`,
-    'Regras: Resposta curta, humana, sem markdown, sem repetir. Não inventar preços, datas, garantias ou prazos.',
-    extrasText ? `Extras:\n${extrasText}` : null,
-    `Mensagem do cliente: "${mensagem || ''}"`,
-    cliente ? `Cliente: ${cliente.nome || cliente.id || 'sem identificação'}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-}
+  if (objetivoNormalizado.includes('pedir outra data')) {
+    return 'Essa semana está completa. Pode sugerir outra data?';
+  }
 
-function buildSystemPrompt() {
-  return [
-    'Você é um atendente humano de oficina/estética automotiva.',
-    'Responda sempre em pt-BR.',
-    'Envie uma única mensagem de WhatsApp, curta e natural.',
-    'Não invente preços, datas, prazos, disponibilidade ou garantias.',
-    'Não diga que é IA e não use markdown.',
-    'Seja cordial, objetivo e sem repetição.',
-  ].join(' ');
+  if (objetivoNormalizado.includes('atendimento finalizado')) {
+    return 'Por aqui está tudo finalizado. Quando quiser um novo orçamento, é só me chamar.';
+  }
+
+  return objetivo;
 }
 
 export default async function gerarRespostaAssistente({
+  telefone,
+  clienteId,
   estado,
-  mensagem,
-  cliente,
-  extras,
+  mensagemUsuario,
+  objetivo,
+  dados,
 } = {}) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return getFallback(estado);
-  }
+  const fallback = montarFallback(objetivo, dados);
 
-  const baseUrl = process.env.OPENAI_BASE_URL || OPENAI_DEFAULT_BASE_URL;
-  const model = process.env.OPENAI_MODEL || OPENAI_DEFAULT_MODEL;
-  const temperature = getEnvNumber(
-    process.env.OPENAI_TEMPERATURE,
-    OPENAI_DEFAULT_TEMPERATURE
-  );
+  const systemPrompt = [
+    'Escreva em pt-BR, tom humano e natural, curto.',
+    'Nada de “Olá! Sou um assistente virtual…”.',
+    'Evite repetir a mesma frase em mensagens consecutivas.',
+    'Faça 1 pergunta por vez quando precisar de informação.',
+    'Se o objetivo for pedir foto: peça foto + qual parte do carro.',
+    'Se o objetivo for pedir data: peça dd/mm e opcional manhã/tarde.',
+    'Se objetivo for confirmar: confirme e diga próximo passo.',
+    'Não invente datas/valores ou detalhes que não estejam nos dados.',
+  ].join(' ');
 
-  const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt({ estado, mensagem, cliente, extras });
+  const userPrompt = `
+Contexto do atendimento:
+- Telefone: ${telefone || 'não informado'}
+- ClienteId: ${clienteId || 'não informado'}
+- Estado: ${estado || 'não informado'}
+- Mensagem do cliente: ${mensagemUsuario || ''}
 
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
+Objetivo: ${objetivo || 'não informado'}
+Dados disponíveis: ${dados ? JSON.stringify(dados) : 'nenhum'}
 
-    if (!response.ok) {
-      console.error('Erro na OpenAI:', response.status, response.statusText);
-      return getFallback(estado);
-    }
+Responda apenas com o texto final para enviar ao cliente.
+`.trim();
 
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content?.trim();
-    if (!content) {
-      return getFallback(estado);
-    }
+  const resposta = await gerarRespostaChat({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    fallback,
+  });
 
-    return content;
-  } catch (err) {
-    console.error('Erro na OpenAI:', err);
-    return getFallback(estado);
-  }
+  return resposta || fallback;
 }
