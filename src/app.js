@@ -161,17 +161,21 @@ app.post('/webhook', async (req, res) => {
         if (contemNovoOrcamento(mensagem)) {
           await setEstado(cliente.id, 'AGUARDANDO_FOTO');
           const respostaNovoOrcamento = await gerarRespostaAssistente({
+            telefone,
+            clienteId: cliente.id,
             estado: 'AGUARDANDO_FOTO',
-            mensagem,
-            cliente,
+            mensagemUsuario: mensagem,
+            objetivo: 'pedir foto',
           });
           await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
           await enviarMensagem(telefone, respostaNovoOrcamento);
         } else {
           const respostaFinalizado = await gerarRespostaAssistente({
+            telefone,
+            clienteId: cliente.id,
             estado: 'FINALIZADO',
-            mensagem,
-            cliente,
+            mensagemUsuario: mensagem,
+            objetivo: 'avisar atendimento finalizado',
           });
           await salvarMensagem(cliente.id, respostaFinalizado, 'resposta');
           await enviarMensagem(telefone, respostaFinalizado);
@@ -183,9 +187,11 @@ app.post('/webhook', async (req, res) => {
       if (atendimento?.estado === 'AGUARDANDO_FOTO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
         const respostaFoto = await gerarRespostaAssistente({
+          telefone,
+          clienteId: cliente.id,
           estado: 'AGUARDANDO_FOTO',
-          mensagem,
-          cliente,
+          mensagemUsuario: mensagem,
+          objetivo: 'pedir foto',
         });
         await salvarMensagem(cliente.id, respostaFoto, 'resposta');
         await enviarMensagem(telefone, respostaFoto);
@@ -203,9 +209,11 @@ app.post('/webhook', async (req, res) => {
 
         if (!data) {
           const respostaData = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_DATA_SEM_DATA',
-            mensagem,
-            cliente,
+            telefone,
+            clienteId: cliente.id,
+            estado: 'AGUARDANDO_DATA',
+            mensagemUsuario: mensagem,
+            objetivo: 'pedir data dd/mm',
           });
           await salvarMensagem(cliente.id, respostaData, 'resposta');
           await enviarMensagem(telefone, respostaData);
@@ -233,16 +241,29 @@ app.post('/webhook', async (req, res) => {
           if (resultadoReserva.reason === 'SEMANA_CHEIA') {
             const sugestao = await findProximaVagaAPartir(data, periodoPreferido);
             if (sugestao) {
-              const respostaSemanaCheia = `Essa semana já está completa. A próxima vaga é ${formatarDataBr(
-                sugestao.data
-              )} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`;
+              const respostaSemanaCheia = await gerarRespostaAssistente({
+                telefone,
+                clienteId: cliente.id,
+                estado: 'AGUARDANDO_DATA',
+                mensagemUsuario: mensagem,
+                objetivo: 'sugerir próxima vaga',
+                dados: {
+                  dataBr: formatarDataBr(sugestao.data),
+                  periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
+                },
+              });
               await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
               await enviarMensagem(telefone, respostaSemanaCheia);
               return res.sendStatus(200);
             }
 
-            const respostaSemanaCheia =
-              'Essa semana já está completa 😕. Pode me sugerir outra data?';
+            const respostaSemanaCheia = await gerarRespostaAssistente({
+              telefone,
+              clienteId: cliente.id,
+              estado: 'AGUARDANDO_DATA',
+              mensagemUsuario: mensagem,
+              objetivo: 'pedir outra data dd/mm',
+            });
             await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
             await enviarMensagem(telefone, respostaSemanaCheia);
             return res.sendStatus(200);
@@ -255,16 +276,29 @@ app.post('/webhook', async (req, res) => {
           const sugestao = await findProximaVagaAPartir(proximaData, periodoPreferido);
 
           if (sugestao) {
-            const respostaIndisponivel = `Esse horário não está disponível 😕. A próxima vaga é ${formatarDataBr(
-              sugestao.data
-            )} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`;
+            const respostaIndisponivel = await gerarRespostaAssistente({
+              telefone,
+              clienteId: cliente.id,
+              estado: 'AGUARDANDO_DATA',
+              mensagemUsuario: mensagem,
+              objetivo: 'sugerir próxima vaga',
+              dados: {
+                dataBr: formatarDataBr(sugestao.data),
+                periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
+              },
+            });
             await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
             await enviarMensagem(telefone, respostaIndisponivel);
             return res.sendStatus(200);
           }
 
-          const respostaIndisponivel =
-            'Esse horário não está disponível 😕. Pode tentar **outra data** ou escolher **manhã/tarde**?';
+          const respostaIndisponivel = await gerarRespostaAssistente({
+            telefone,
+            clienteId: cliente.id,
+            estado: 'AGUARDANDO_DATA',
+            mensagemUsuario: mensagem,
+            objetivo: 'pedir outra data dd/mm',
+          });
           await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
           await enviarMensagem(telefone, respostaIndisponivel);
           return res.sendStatus(200);
@@ -279,9 +313,17 @@ app.post('/webhook', async (req, res) => {
         await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
         const periodoTxt = periodoReservado === 'TARDE' ? 'tarde' : 'manhã';
-        const respostaConfirmacao = `Perfeito — já pré-reservei ${formatarDataBr(
-          data
-        )} (${periodoTxt}) ✅. Agora estou confirmando com o responsável e já te retorno.`;
+        const respostaConfirmacao = await gerarRespostaAssistente({
+          telefone,
+          clienteId: cliente.id,
+          estado: 'AGUARDANDO_APROVACAO_DONO',
+          mensagemUsuario: mensagem,
+          objetivo: 'confirmar pré-reserva',
+          dados: {
+            dataBr: formatarDataBr(data),
+            periodoTxt,
+          },
+        });
 
         await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
         await enviarMensagem(telefone, respostaConfirmacao);
@@ -293,9 +335,11 @@ app.post('/webhook', async (req, res) => {
       if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
         const respostaStatus = await gerarRespostaAssistente({
+          telefone,
+          clienteId: cliente.id,
           estado: 'AGUARDANDO_APROVACAO_DONO',
-          mensagem,
-          cliente,
+          mensagemUsuario: mensagem,
+          objetivo: 'avisar aguardando dono',
         });
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
         await enviarMensagem(telefone, respostaStatus);
