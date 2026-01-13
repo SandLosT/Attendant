@@ -51,8 +51,9 @@ export default async function gerarRespostaAssistente({
   mensagemUsuario,
   objetivo,
   dados,
+  draft,
 } = {}) {
-  const fallback = montarFallback(objetivo, dados);
+  const fallback = draft || montarFallback(objetivo, dados);
 
   const systemPrompt = [
     'Escreva em pt-BR, tom humano e natural, curto.',
@@ -73,6 +74,7 @@ Contexto do atendimento:
 - Mensagem do cliente: ${mensagemUsuario || ''}
 
 Objetivo: ${objetivo || 'não informado'}
+Draft sugerido: ${draft || 'nenhum'}
 Dados disponíveis: ${dados ? JSON.stringify(dados) : 'nenhum'}
 
 Responda apenas com o texto final para enviar ao cliente.

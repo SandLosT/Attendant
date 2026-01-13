@@ -14,15 +14,41 @@ function extractFromCandidates(candidates = []) {
   return '';
 }
 
+function extractBoolean(candidates = []) {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'boolean') {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function extractMessageId(candidates = []) {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate;
+    }
+    if (candidate && typeof candidate === 'object') {
+      const serialized = candidate._serialized;
+      if (typeof serialized === 'string' && serialized.trim()) {
+        return serialized;
+      }
+    }
+  }
+  return undefined;
+}
+
 export function normalizeWppEvent(body) {
   const eventData = body?.data || body || {};
-  const rawFromMe =
-    eventData.fromMe ??
-    eventData?.key?.fromMe ??
-    body?.fromMe ??
-    body?.data?.fromMe ??
-    body?.data?.key?.fromMe;
-  const fromMe = typeof rawFromMe === 'boolean' ? rawFromMe : undefined;
+  const payload = body?.payload || {};
+  const event = body?.event ?? body?.data?.event ?? payload?.event;
+  const fromMe = extractBoolean([
+    eventData.fromMe,
+    payload.fromMe,
+    eventData?.id?.fromMe,
+    eventData?.key?.fromMe,
+    eventData?.msg?.key?.fromMe,
+  ]);
   const phone = extractFromCandidates([
     eventData.from,
     eventData.sender?.id,
@@ -31,14 +57,14 @@ export function normalizeWppEvent(body) {
     eventData?.key?.remoteJid,
   ]);
 
-  const messageId =
-    eventData.id ||
-    eventData.messageId ||
-    body?.messageId ||
-    body?.id ||
-    body?.data?.id ||
-    body?.data?.messageId ||
-    eventData?.key?.id;
+  const messageId = extractMessageId([
+    body?.messageId,
+    eventData.messageId,
+    eventData?.id?._serialized,
+    payload?.id?._serialized,
+    eventData.id,
+    payload.id,
+  ]);
   const mimetype = eventData.mimetype || eventData.mimeType;
   const filename = eventData.filename || eventData.fileName;
   const hasImageType =
@@ -51,6 +77,7 @@ export function normalizeWppEvent(body) {
 
   if (hasImageType) {
     return {
+      event,
       phone,
       kind: 'image',
       text,
@@ -64,6 +91,7 @@ export function normalizeWppEvent(body) {
 
   if (typeof text === 'string' && text.trim()) {
     return {
+      event,
       phone,
       kind: 'text',
       text: text.trim(),
@@ -73,6 +101,7 @@ export function normalizeWppEvent(body) {
   }
 
   return {
+    event,
     phone,
     kind: 'other',
     messageId,

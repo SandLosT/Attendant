@@ -2,8 +2,16 @@ export async function up(knex) {
   const hasSlotData = await knex.schema.hasColumn('orcamentos', 'slot_data');
   const hasSlotPeriodo = await knex.schema.hasColumn('orcamentos', 'slot_periodo');
   const hasSlotReservadoEm = await knex.schema.hasColumn('orcamentos', 'slot_reservado_em');
+  const hasDataPreferida = await knex.schema.hasColumn('orcamentos', 'data_preferida');
+  const hasPeriodoPreferido = await knex.schema.hasColumn('orcamentos', 'periodo_preferido');
 
-  if (!hasSlotData || !hasSlotPeriodo || !hasSlotReservadoEm) {
+  if (
+    !hasSlotData ||
+    !hasSlotPeriodo ||
+    !hasSlotReservadoEm ||
+    !hasDataPreferida ||
+    !hasPeriodoPreferido
+  ) {
     await knex.schema.alterTable('orcamentos', (table) => {
       if (!hasSlotData) {
         table.date('slot_data').nullable();
@@ -13,6 +21,12 @@ export async function up(knex) {
       }
       if (!hasSlotReservadoEm) {
         table.dateTime('slot_reservado_em').nullable();
+      }
+      if (!hasDataPreferida) {
+        table.date('data_preferida').nullable();
+      }
+      if (!hasPeriodoPreferido) {
+        table.string('periodo_preferido').nullable();
       }
     });
   }
@@ -40,8 +54,16 @@ export async function down(knex) {
   const hasSlotData = await knex.schema.hasColumn('orcamentos', 'slot_data');
   const hasSlotPeriodo = await knex.schema.hasColumn('orcamentos', 'slot_periodo');
   const hasSlotReservadoEm = await knex.schema.hasColumn('orcamentos', 'slot_reservado_em');
+  const hasDataPreferida = await knex.schema.hasColumn('orcamentos', 'data_preferida');
+  const hasPeriodoPreferido = await knex.schema.hasColumn('orcamentos', 'periodo_preferido');
 
-  if (hasSlotData || hasSlotPeriodo || hasSlotReservadoEm) {
+  if (
+    hasSlotData ||
+    hasSlotPeriodo ||
+    hasSlotReservadoEm ||
+    hasDataPreferida ||
+    hasPeriodoPreferido
+  ) {
     await knex.schema.alterTable('orcamentos', (table) => {
       if (hasSlotData) {
         table.dropColumn('slot_data');
@@ -51,6 +73,12 @@ export async function down(knex) {
       }
       if (hasSlotReservadoEm) {
         table.dropColumn('slot_reservado_em');
+      }
+      if (hasDataPreferida) {
+        table.dropColumn('data_preferida');
+      }
+      if (hasPeriodoPreferido) {
+        table.dropColumn('periodo_preferido');
       }
     });
   }
