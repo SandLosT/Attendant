@@ -95,21 +95,17 @@ app.get('/', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-  console.log('📥 Webhook recebido:', {
-    event: req.body?.event,
-    type: req.body?.type,
-    from: req.body?.from || req.body?.data?.from,
-    hasBase64: Boolean(req.body?.base64 || req.body?.data?.base64),
-    hasMessageId: Boolean(
-      req.body?.messageId || req.body?.data?.messageId || req.body?.id
-    ),
-  });
-
   const normalized = normalizeWppEvent(req.body);
-  console.log('🧹 Evento normalizado:', normalized);
-  if (normalized.fromMe === true) {
-    return res.sendStatus(200);
-  }
+  const hasBase64 = Boolean(req.body?.base64 || req.body?.data?.base64);
+  const hasMessageId = Boolean(normalized.messageId);
+
+  console.log('📥 Webhook recebido:', {
+    event: normalized.event,
+    phone: normalized.phone,
+    messageId: normalized.messageId,
+    hasBase64,
+    hasMessageId,
+  });
 
   const now = Date.now();
   for (const [key, timestamp] of webhookDedupe.entries()) {
@@ -118,12 +114,25 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
-  if (normalized.messageId) {
-    const lastSeen = webhookDedupe.get(normalized.messageId);
-    if (lastSeen && now - lastSeen < WEBHOOK_DEDUPE_TTL_MS) {
-      return res.sendStatus(200);
+  const shouldIgnore = (() => {
+    if (normalized.event && normalized.event !== 'onmessage') {
+      return 'event';
     }
-    webhookDedupe.set(normalized.messageId, now);
+    if (normalized.fromMe === true) {
+      return 'fromMe';
+    }
+    if (normalized.messageId) {
+      const lastSeen = webhookDedupe.get(normalized.messageId);
+      if (lastSeen && now - lastSeen < WEBHOOK_DEDUPE_TTL_MS) {
+        return 'dedupe';
+      }
+      webhookDedupe.set(normalized.messageId, now);
+    }
+    return null;
+  })();
+
+  if (shouldIgnore) {
+    return res.status(200).json({ info: 'ignored', reason: shouldIgnore });
   }
 
   // ✅ Evita loop: ignora mensagens enviadas pelo próprio WhatsApp da sessão (fromMe)
@@ -214,6 +223,7 @@ app.post('/webhook', async (req, res) => {
             estado: 'AGUARDANDO_DATA',
             mensagemUsuario: mensagem,
             objetivo: 'pedir data dd/mm',
+            draft: 'Qual a data (dd/mm)? Se quiser, pode dizer manhã ou tarde.',
           });
           await salvarMensagem(cliente.id, respostaData, 'resposta');
           await enviarMensagem(telefone, respostaData);
@@ -251,6 +261,7 @@ app.post('/webhook', async (req, res) => {
                   dataBr: formatarDataBr(sugestao.data),
                   periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
                 },
+                draft: `A próxima vaga é ${formatarDataBr(sugestao.data)} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`,
               });
               await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
               await enviarMensagem(telefone, respostaSemanaCheia);
@@ -263,6 +274,7 @@ app.post('/webhook', async (req, res) => {
               estado: 'AGUARDANDO_DATA',
               mensagemUsuario: mensagem,
               objetivo: 'pedir outra data dd/mm',
+              draft: 'Essa semana está completa. Pode sugerir outra data?',
             });
             await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
             await enviarMensagem(telefone, respostaSemanaCheia);
@@ -286,6 +298,7 @@ app.post('/webhook', async (req, res) => {
                 dataBr: formatarDataBr(sugestao.data),
                 periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
               },
+              draft: `A próxima vaga é ${formatarDataBr(sugestao.data)} (${sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde'}). Pode ser?`,
             });
             await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
             await enviarMensagem(telefone, respostaIndisponivel);
@@ -298,6 +311,7 @@ app.post('/webhook', async (req, res) => {
             estado: 'AGUARDANDO_DATA',
             mensagemUsuario: mensagem,
             objetivo: 'pedir outra data dd/mm',
+            draft: 'Não temos vaga nessa data. Pode sugerir outra?',
           });
           await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
           await enviarMensagem(telefone, respostaIndisponivel);
@@ -323,6 +337,7 @@ app.post('/webhook', async (req, res) => {
             dataBr: formatarDataBr(data),
             periodoTxt,
           },
+          draft: `Perfeito, pré-reservei ${formatarDataBr(data)} (${periodoTxt}). Vou confirmar com o responsável e já te retorno.`,
         });
 
         await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
