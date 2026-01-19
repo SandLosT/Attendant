@@ -5,10 +5,13 @@
 ### Desenvolvimento (Vite)
 
 ```bash
+npm install
+npm run dev
 npm run pwa:dev
 ```
 
 O Vite expõe o PWA em `http://localhost:5173` para desenvolvimento local.
+Configure CORS no backend com `OWNER_APP_ORIGIN=http://localhost:5173`.
 
 ### Produção (build + Express)
 

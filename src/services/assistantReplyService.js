@@ -105,16 +105,17 @@ export async function gerarRespostaHumanizada({
   dadosOrcamento,
   clienteTelefone,
 } = {}) {
+  if (!openAIKeyDisponivel()) {
+    console.warn('OPENAI_API_KEY ausente');
+    return 'Obrigada! Já te respondo por aqui.';
+  }
+
   const fallback = gerarFallback({
     estado,
     mensagemUsuario,
     dadosOrcamento,
     clienteTelefone,
   });
-
-  if (!openAIKeyDisponivel()) {
-    return fallback;
-  }
 
   const userPrompt = [
     `Estado: ${estado || 'desconhecido'}`,
