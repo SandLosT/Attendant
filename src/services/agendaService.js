@@ -1,8 +1,8 @@
 import { db } from '../database/index.js';
 
-const AGENDA_LIMITE_SEMANAL = Number(process.env.AGENDA_LIMITE_SEMANAL) || 5;
 const AGENDA_LOOKAHEAD_DIAS = Number(process.env.AGENDA_LOOKAHEAD_DIAS) || 30;
 const AGENDA_CAPACIDADE_PADRAO = Number(process.env.AGENDA_CAPACIDADE_PADRAO) || 3;
+const WEEKLY_CAP = Number(process.env.WEEKLY_CAP) || 5;
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -50,7 +50,7 @@ function toISODate(dateOrString) {
   return null;
 }
 
-function getWeekRange(isoDate) {
+export function getSemanaKey(isoDate) {
   const parsed = parseISODate(isoDate);
   if (!parsed) {
     return null;
@@ -61,6 +61,16 @@ function getWeekRange(isoDate) {
   const start = new Date(parsed);
   start.setDate(parsed.getDate() - diffToMonday);
 
+  return formatDate(start);
+}
+
+function getWeekRange(isoDate) {
+  const semanaKey = getSemanaKey(isoDate);
+  if (!semanaKey) {
+    return null;
+  }
+
+  const start = parseISODate(semanaKey);
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
 
@@ -98,8 +108,8 @@ async function ensureSlotExists(data, periodo, capacidadePadrao = AGENDA_CAPACID
   return { ...novoSlot, criado: true };
 }
 
-async function countReservadosSemana(isoDate, trx = db) {
-  const range = getWeekRange(isoDate);
+export async function contarReservasSemana(semanaStartISO, trx = db) {
+  const range = getWeekRange(semanaStartISO);
   if (!range) {
     return 0;
   }
@@ -113,8 +123,13 @@ async function countReservadosSemana(isoDate, trx = db) {
 }
 
 async function isSemanaCheia(isoDate, trx = db) {
-  const total = await countReservadosSemana(isoDate, trx);
-  return total >= AGENDA_LIMITE_SEMANAL;
+  const semanaKey = getSemanaKey(isoDate);
+  if (!semanaKey) {
+    return false;
+  }
+
+  const total = await contarReservasSemana(semanaKey, trx);
+  return total >= WEEKLY_CAP;
 }
 
 async function findProximaVagaAPartir(isoDateStart, periodoPreferido) {
@@ -136,9 +151,17 @@ async function findProximaVagaAPartir(isoDateStart, periodoPreferido) {
     return null;
   }
 
+  let semanaAtual = null;
+  let semanaCheia = false;
+
   for (let i = 0; i < AGENDA_LOOKAHEAD_DIAS && dataAtual; i += 1) {
     const dataISO = formatDate(dataAtual);
-    const semanaCheia = await isSemanaCheia(dataISO);
+    const semanaKey = getSemanaKey(dataISO);
+
+    if (semanaKey !== semanaAtual) {
+      semanaAtual = semanaKey;
+      semanaCheia = await isSemanaCheia(dataISO);
+    }
 
     if (!semanaCheia) {
       for (const periodo of periodosTentativa) {
@@ -207,7 +230,7 @@ export async function preReservarSlot(dataYYYYMMDD, periodo) {
       .where({ id: slot.id })
       .update({ reservados: slot.reservados + 1 });
 
-    return { ok: true };
+    return { ok: true, slot: { ...slot, reservados: slot.reservados + 1 } };
   });
 }
 
@@ -374,9 +397,4 @@ export function extrairDataEPeriodo(texto) {
   return { data: null, periodo };
 }
 
-export {
-  ensureSlotExists,
-  countReservadosSemana,
-  isSemanaCheia,
-  findProximaVagaAPartir,
-};
+export { ensureSlotExists, isSemanaCheia, findProximaVagaAPartir };

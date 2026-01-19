@@ -16,6 +16,13 @@ export async function getOrCreateAtendimento(clienteId) {
 
   const existente = await getAtendimentoByClienteId(clienteId);
   if (existente) {
+    if (!existente.estado) {
+      await db('atendimentos')
+        .where({ cliente_id: clienteId })
+        .update({ estado: 'AGUARDANDO_FOTO' });
+      return getAtendimentoByClienteId(clienteId);
+    }
+
     return existente;
   }
 
@@ -45,49 +52,48 @@ export async function setEstado(clienteId, estado) {
 }
 
 export function isManualAtivo(atendimento) {
-  if (!atendimento || atendimento.modo !== 'MANUAL') {
+  if (!atendimento) {
     return false;
   }
 
   if (!atendimento.modo_manual_ate) {
-    return true;
+    return false;
   }
 
   return new Date(atendimento.modo_manual_ate) > new Date();
 }
 
-export async function setManual(clienteId, { minutos = 120, motivo = null } = {}) {
+export async function ativarManual(clienteId, minutes = 120) {
   if (!clienteId) {
-    throw new Error('clienteId é obrigatório para ajustar modo manual do atendimento.');
+    throw new Error('clienteId é obrigatório para ativar modo manual.');
   }
 
   const atendimento = await getAtendimentoByClienteId(clienteId);
 
   if (!atendimento) {
-    throw new Error('Atendimento não encontrado para ajustar modo manual.');
+    throw new Error('Atendimento não encontrado para ativar modo manual.');
   }
 
-  const minutosFinal = Number.isFinite(Number(minutos)) ? Number(minutos) : 120;
+  const minutosFinal = Number.isFinite(Number(minutes)) ? Number(minutes) : 120;
   const manualAte = new Date(Date.now() + minutosFinal * 60 * 1000);
 
   await db('atendimentos').where({ cliente_id: clienteId }).update({
     modo: 'MANUAL',
     modo_manual_ate: manualAte,
-    manual_motivo: motivo,
   });
 
   return manualAte;
 }
 
-export async function setAuto(clienteId) {
+export async function desativarManual(clienteId) {
   if (!clienteId) {
-    throw new Error('clienteId é obrigatório para ajustar modo automático do atendimento.');
+    throw new Error('clienteId é obrigatório para desativar modo manual.');
   }
 
   const atendimento = await getAtendimentoByClienteId(clienteId);
 
   if (!atendimento) {
-    throw new Error('Atendimento não encontrado para ajustar modo automático.');
+    throw new Error('Atendimento não encontrado para desativar modo manual.');
   }
 
   return db('atendimentos').where({ cliente_id: clienteId }).update({
@@ -95,6 +101,24 @@ export async function setAuto(clienteId) {
     modo_manual_ate: null,
     manual_motivo: null,
   });
+}
+
+export async function setManual(clienteId, { minutos = 120, motivo = null } = {}) {
+  if (!clienteId) {
+    throw new Error('clienteId é obrigatório para ajustar modo manual do atendimento.');
+  }
+
+  const manualAte = await ativarManual(clienteId, minutos);
+
+  await db('atendimentos')
+    .where({ cliente_id: clienteId })
+    .update({ manual_motivo: motivo });
+
+  return manualAte;
+}
+
+export async function setAuto(clienteId) {
+  return desativarManual(clienteId);
 }
 
 export async function setModo(clienteId, modo, { ate = null, motivo = null } = {}) {
