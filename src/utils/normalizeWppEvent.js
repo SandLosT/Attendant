@@ -14,10 +14,35 @@ function extractFromCandidates(candidates = []) {
   return '';
 }
 
+function normalizeBoolean(candidate) {
+  if (typeof candidate === 'boolean') {
+    return candidate;
+  }
+  if (typeof candidate === 'string') {
+    const normalized = candidate.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y'].includes(normalized)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n'].includes(normalized)) {
+      return false;
+    }
+  }
+  if (typeof candidate === 'number') {
+    if (candidate === 1) {
+      return true;
+    }
+    if (candidate === 0) {
+      return false;
+    }
+  }
+  return undefined;
+}
+
 function extractBoolean(candidates = []) {
   for (const candidate of candidates) {
-    if (typeof candidate === 'boolean') {
-      return candidate;
+    const normalized = normalizeBoolean(candidate);
+    if (typeof normalized === 'boolean') {
+      return normalized;
     }
   }
   return undefined;
@@ -26,22 +51,41 @@ function extractBoolean(candidates = []) {
 function extractMessageId(candidates = []) {
   for (const candidate of candidates) {
     if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate;
+      return candidate.trim();
     }
     if (candidate && typeof candidate === 'object') {
       const serialized = candidate._serialized;
       if (typeof serialized === 'string' && serialized.trim()) {
-        return serialized;
+        return serialized.trim();
+      }
+      const id = candidate.id;
+      if (typeof id === 'string' && id.trim()) {
+        return id.trim();
       }
     }
   }
   return undefined;
 }
 
+function normalizeEventName(value) {
+  if (!value) {
+    return '';
+  }
+  return value.toString().trim().toLowerCase();
+}
+
+function normalizeType(value) {
+  if (!value) {
+    return '';
+  }
+  return value.toString().trim().toLowerCase();
+}
+
 export function normalizeWppEvent(body) {
   const eventData = body?.data || body || {};
   const payload = body?.payload || {};
-  const event = body?.event ?? body?.data?.event ?? payload?.event;
+  const eventRaw = body?.event ?? body?.data?.event ?? payload?.event;
+  const event = normalizeEventName(eventRaw);
   const fromMe = extractBoolean([
     eventData.fromMe,
     payload.fromMe,
@@ -62,13 +106,16 @@ export function normalizeWppEvent(body) {
     eventData.messageId,
     eventData?.id?._serialized,
     payload?.id?._serialized,
+    eventData?.key?.id,
+    eventData?.msg?.key?.id,
     eventData.id,
     payload.id,
   ]);
   const mimetype = eventData.mimetype || eventData.mimeType;
   const filename = eventData.filename || eventData.fileName;
+  const type = normalizeType(eventData.type || eventData.messageType || payload?.type);
   const hasImageType =
-    eventData.type === 'image' ||
+    type === 'image' ||
     eventData.isMedia === true ||
     (typeof mimetype === 'string' && mimetype.startsWith('image'));
 
@@ -78,6 +125,7 @@ export function normalizeWppEvent(body) {
   if (hasImageType) {
     return {
       event,
+      type,
       phone,
       kind: 'image',
       text,
@@ -92,6 +140,7 @@ export function normalizeWppEvent(body) {
   if (typeof text === 'string' && text.trim()) {
     return {
       event,
+      type,
       phone,
       kind: 'text',
       text: text.trim(),
@@ -102,6 +151,7 @@ export function normalizeWppEvent(body) {
 
   return {
     event,
+    type,
     phone,
     kind: 'other',
     messageId,
