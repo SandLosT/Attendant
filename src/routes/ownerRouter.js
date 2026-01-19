@@ -2,6 +2,8 @@ import express from 'express';
 import { db } from '../database/index.js';
 import { enviarMensagem } from '../services/wppconnectService.js';
 import {
+  ativarManual,
+  desativarManual,
   getAtendimentoByClienteId,
   getOrCreateAtendimento,
   setAuto,
@@ -71,7 +73,13 @@ async function buscarOrcamentosPorStatus(status) {
   const orcamentos = await db('orcamentos as o')
     .select('o.*', 'c.telefone as cliente_telefone', 'c.nome as cliente_nome', ...selecionarUltimaImagem())
     .join('clientes as c', 'c.id', 'o.cliente_id')
-    .where('o.status', status)
+    .where((builder) => {
+      if (status === 'FINALIZADO_MANUAL') {
+        builder.whereIn('o.status', ['FINALIZADO_MANUAL', 'FECHADO_MANUAL']);
+      } else {
+        builder.where('o.status', status);
+      }
+    })
     .orderBy('o.id', 'desc');
 
   return adicionarSuggestedValue(orcamentos);
@@ -85,6 +93,11 @@ router.get('/orcamentos', async (req, res) => {
 
   if (!rawStatus && status === 'AGUARDANDO_APROVACAO_DONO' && orcamentos.length === 0) {
     status = 'PENDENTE';
+    orcamentos = await buscarOrcamentosPorStatus(status);
+  }
+
+  if (!rawStatus && status === 'PENDENTE' && orcamentos.length === 0) {
+    status = 'FINALIZADO_MANUAL';
     orcamentos = await buscarOrcamentosPorStatus(status);
   }
 
@@ -198,7 +211,7 @@ router.post('/orcamentos/:id/fechar_manual', async (req, res) => {
   await db('orcamentos')
     .where({ id })
     .update({
-      status: 'FECHADO_MANUAL',
+      status: 'FINALIZADO_MANUAL',
       valor_final: valor_final ?? null,
       data_agendada: data_agendada ?? orcamento.data_agendada ?? null,
       fechado_em: db.fn.now(),
@@ -213,13 +226,24 @@ router.post('/orcamentos/:id/fechar_manual', async (req, res) => {
   const atendimento = await getAtendimentoByClienteId(orcamento.cliente_id);
 
   if (atendimento) {
-    await setAuto(orcamento.cliente_id);
+    await desativarManual(orcamento.cliente_id);
     await setEstado(orcamento.cliente_id, 'FINALIZADO');
   }
 
   const orcamentoAtualizado = await db('orcamentos').where({ id }).first();
 
   return res.json({ orcamento: orcamentoAtualizado });
+});
+
+router.post('/clientes/:clienteId/takeover', async (req, res) => {
+  const { clienteId } = req.params;
+  const { minutes } = req.body || {};
+  const duracaoMinutos = Number(minutes) || 120;
+
+  await getOrCreateAtendimento(clienteId);
+  const manualAte = await ativarManual(clienteId, duracaoMinutos);
+
+  return res.json({ ok: true, modo: 'MANUAL', modo_manual_ate: manualAte });
 });
 
 router.post('/orcamentos/:id/recusar', async (req, res) => {

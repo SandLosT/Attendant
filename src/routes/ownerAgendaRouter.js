@@ -1,6 +1,10 @@
 import express from 'express';
-import { db } from '../database/index.js';
-import { ensureSlotExists, normalizarPeriodo } from '../services/agendaService.js';
+import {
+  ensureSlotExists,
+  listarDisponibilidade,
+  normalizarPeriodo,
+  setBloqueado,
+} from '../services/agendaService.js';
 
 const router = express.Router();
 
@@ -88,11 +92,7 @@ router.get('/', async (req, res) => {
       .json({ erro: 'Parâmetros from e to são obrigatórios no formato YYYY-MM-DD' });
   }
 
-  const slots = await db('agenda_slots')
-    .select('data', 'periodo', 'capacidade', 'reservados', 'bloqueado')
-    .whereBetween('data', [from, to])
-    .orderBy('data', 'asc')
-    .orderBy('periodo', 'asc');
+  const slots = await listarDisponibilidade(from, to);
 
   return res.json({ slots });
 });
@@ -106,15 +106,14 @@ router.post('/bloquear', async (req, res) => {
     return res.status(400).json({ erro: 'data e periodo são obrigatórios' });
   }
 
-  await ensureSlotExists(dataISO, periodoNormalizado);
+  const updated = await setBloqueado(dataISO, periodoNormalizado, bloqueado);
 
-  await db('agenda_slots')
-    .where({ data: dataISO, periodo: periodoNormalizado })
-    .update({ bloqueado: bloqueado ? 1 : 0 });
+  if (!updated) {
+    return res.status(400).json({ erro: 'Não foi possível atualizar o bloqueio do slot.' });
+  }
 
-  const slot = await db('agenda_slots')
-    .where({ data: dataISO, periodo: periodoNormalizado })
-    .first();
+  const slots = await listarDisponibilidade(dataISO, dataISO);
+  const slot = slots.find((item) => item.periodo === periodoNormalizado) || null;
 
   return res.json({ slot });
 });
