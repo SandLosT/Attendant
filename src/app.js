@@ -36,6 +36,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const OWNER_APP_ORIGIN = process.env.OWNER_APP_ORIGIN || '';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const pwaDistPath = path.resolve(__dirname, '../pwa-owner/dist');
@@ -93,6 +94,75 @@ function normalizarResultadoReserva(ret) {
   return { ok: false };
 }
 
+function construirResumoAtendimento({ estado, acao, dados = {} }) {
+  return {
+    estado,
+    acao,
+    tom: 'humano_curto',
+    ...dados,
+  };
+}
+
+function shouldIgnoreWebhook(normalized) {
+  const now = Date.now();
+  for (const [key, timestamp] of webhookDedupe.entries()) {
+    if (now - timestamp > WEBHOOK_DEDUPE_TTL_MS) {
+      webhookDedupe.delete(key);
+    }
+  }
+  for (const [key, timestamp] of webhookHashDedupe.entries()) {
+    if (now - timestamp > HASH_DEDUPE_TTL_MS) {
+      webhookHashDedupe.delete(key);
+    }
+  }
+
+  if (normalized.event && normalized.event !== 'onmessage') {
+    return { ignore: true, reason: 'not_onmessage' };
+  }
+
+  if (normalized.fromMe === true) {
+    return { ignore: true, reason: 'fromMe' };
+  }
+
+  if (normalized.messageId) {
+    const lastSeen = webhookDedupe.get(normalized.messageId);
+    if (lastSeen && now - lastSeen < WEBHOOK_DEDUPE_TTL_MS) {
+      return { ignore: true, reason: 'duplicate' };
+    }
+    webhookDedupe.set(normalized.messageId, now);
+    return { ignore: false };
+  }
+
+  const text = normalized.text || '';
+  const base64Length = normalized.base64 ? normalized.base64.length : 0;
+  const hashKey = `${normalized.phone}|${normalized.kind}|${text}|${base64Length}`;
+  const lastSeen = webhookHashDedupe.get(hashKey);
+  if (lastSeen && now - lastSeen < HASH_DEDUPE_TTL_MS) {
+    return { ignore: true, reason: 'duplicate' };
+  }
+  webhookHashDedupe.set(hashKey, now);
+  return { ignore: false };
+}
+
+app.use((req, res, next) => {
+  if (!OWNER_APP_ORIGIN) {
+    return next();
+  }
+
+  const origin = req.headers.origin;
+  if (origin && origin === OWNER_APP_ORIGIN) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  return next();
+});
+
 app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
 app.use('/owner/agenda', ownerAgendaRouter);
@@ -122,45 +192,10 @@ app.post('/webhook', async (req, res) => {
     hasMessageId,
   });
 
-  const now = Date.now();
-  for (const [key, timestamp] of webhookDedupe.entries()) {
-    if (now - timestamp > WEBHOOK_DEDUPE_TTL_MS) {
-      webhookDedupe.delete(key);
-    }
-  }
-  for (const [key, timestamp] of webhookHashDedupe.entries()) {
-    if (now - timestamp > HASH_DEDUPE_TTL_MS) {
-      webhookHashDedupe.delete(key);
-    }
-  }
-
-  if (normalized.event !== 'onmessage') {
-    console.log('🛑 Webhook ignorado:', { ignored: 'not_onmessage' });
-    return res.status(200).json({ info: 'ignored', reason: 'not_onmessage' });
-  }
-
-  if (normalized.fromMe === true) {
-    console.log('🛑 Webhook ignorado:', { ignored: 'fromMe' });
-    return res.status(200).json({ info: 'ignored', reason: 'fromMe' });
-  }
-
-  if (normalized.messageId) {
-    const lastSeen = webhookDedupe.get(normalized.messageId);
-    if (lastSeen && now - lastSeen < WEBHOOK_DEDUPE_TTL_MS) {
-      console.log('🛑 Webhook ignorado:', { ignored: 'duplicate' });
-      return res.status(200).json({ info: 'ignored', reason: 'duplicate' });
-    }
-    webhookDedupe.set(normalized.messageId, now);
-  } else {
-    const text = normalized.text || '';
-    const base64Length = normalized.base64 ? normalized.base64.length : 0;
-    const hashKey = `${normalized.phone}|${normalized.kind}|${text}|${base64Length}`;
-    const lastSeen = webhookHashDedupe.get(hashKey);
-    if (lastSeen && now - lastSeen < HASH_DEDUPE_TTL_MS) {
-      console.log('🛑 Webhook ignorado:', { ignored: 'duplicate' });
-      return res.status(200).json({ info: 'ignored', reason: 'duplicate' });
-    }
-    webhookHashDedupe.set(hashKey, now);
+  const ignoreResult = shouldIgnoreWebhook(normalized);
+  if (ignoreResult.ignore) {
+    console.log('🛑 Webhook ignorado:', { ignored: ignoreResult.reason });
+    return res.status(200).json({ ok: true, ignored: ignoreResult.reason });
   }
 
   // ✅ Evita loop: ignora mensagens enviadas pelo próprio WhatsApp da sessão (fromMe)
@@ -200,7 +235,10 @@ app.post('/webhook', async (req, res) => {
           const respostaNovoOrcamento = await gerarRespostaHumanizada({
             estado: 'AGUARDANDO_FOTO',
             mensagemUsuario: mensagem,
-            dadosOrcamento: { acao: 'pedir_foto' },
+            dadosOrcamento: construirResumoAtendimento({
+              estado: 'AGUARDANDO_FOTO',
+              acao: 'pedir_foto',
+            }),
             clienteTelefone: telefone,
           });
           await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
@@ -209,7 +247,10 @@ app.post('/webhook', async (req, res) => {
           const respostaFinalizado = await gerarRespostaHumanizada({
             estado: 'FINALIZADO',
             mensagemUsuario: mensagem,
-            dadosOrcamento: { acao: 'finalizado' },
+            dadosOrcamento: construirResumoAtendimento({
+              estado: 'FINALIZADO',
+              acao: 'finalizado',
+            }),
             clienteTelefone: telefone,
           });
           await salvarMensagem(cliente.id, respostaFinalizado, 'resposta');
@@ -224,7 +265,10 @@ app.post('/webhook', async (req, res) => {
         const respostaFoto = await gerarRespostaHumanizada({
           estado: 'AGUARDANDO_FOTO',
           mensagemUsuario: mensagem,
-          dadosOrcamento: { acao: 'pedir_foto' },
+          dadosOrcamento: construirResumoAtendimento({
+            estado: 'AGUARDANDO_FOTO',
+            acao: 'pedir_foto',
+          }),
           clienteTelefone: telefone,
         });
         await salvarMensagem(cliente.id, respostaFoto, 'resposta');
@@ -245,7 +289,10 @@ app.post('/webhook', async (req, res) => {
           const respostaData = await gerarRespostaHumanizada({
             estado: 'AGUARDANDO_DATA',
             mensagemUsuario: mensagem,
-            dadosOrcamento: { acao: 'pedir_data' },
+            dadosOrcamento: construirResumoAtendimento({
+              estado: 'AGUARDANDO_DATA',
+              acao: 'pedir_data',
+            }),
             clienteTelefone: telefone,
           });
           await salvarMensagem(cliente.id, respostaData, 'resposta');
@@ -277,11 +324,14 @@ app.post('/webhook', async (req, res) => {
               const respostaSemanaCheia = await gerarRespostaHumanizada({
                 estado: 'AGUARDANDO_DATA',
                 mensagemUsuario: mensagem,
-                dadosOrcamento: {
+                dadosOrcamento: construirResumoAtendimento({
+                  estado: 'AGUARDANDO_DATA',
                   acao: 'sugerir_vaga',
-                  dataBr: formatarDataBr(sugestao.data),
-                  periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
-                },
+                  dados: {
+                    dataBr: formatarDataBr(sugestao.data),
+                    periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
+                  },
+                }),
                 clienteTelefone: telefone,
               });
               await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
@@ -292,7 +342,10 @@ app.post('/webhook', async (req, res) => {
             const respostaSemanaCheia = await gerarRespostaHumanizada({
               estado: 'AGUARDANDO_DATA',
               mensagemUsuario: mensagem,
-              dadosOrcamento: { acao: 'semana_cheia' },
+              dadosOrcamento: construirResumoAtendimento({
+                estado: 'AGUARDANDO_DATA',
+                acao: 'semana_cheia',
+              }),
               clienteTelefone: telefone,
             });
             await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
@@ -310,11 +363,14 @@ app.post('/webhook', async (req, res) => {
             const respostaIndisponivel = await gerarRespostaHumanizada({
               estado: 'AGUARDANDO_DATA',
               mensagemUsuario: mensagem,
-              dadosOrcamento: {
+              dadosOrcamento: construirResumoAtendimento({
+                estado: 'AGUARDANDO_DATA',
                 acao: 'sugerir_vaga',
-                dataBr: formatarDataBr(sugestao.data),
-                periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
-              },
+                dados: {
+                  dataBr: formatarDataBr(sugestao.data),
+                  periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
+                },
+              }),
               clienteTelefone: telefone,
             });
             await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
@@ -325,7 +381,10 @@ app.post('/webhook', async (req, res) => {
           const respostaIndisponivel = await gerarRespostaHumanizada({
             estado: 'AGUARDANDO_DATA',
             mensagemUsuario: mensagem,
-            dadosOrcamento: { acao: 'indisponivel' },
+            dadosOrcamento: construirResumoAtendimento({
+              estado: 'AGUARDANDO_DATA',
+              acao: 'indisponivel',
+            }),
             clienteTelefone: telefone,
           });
           await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
@@ -345,11 +404,14 @@ app.post('/webhook', async (req, res) => {
         const respostaConfirmacao = await gerarRespostaHumanizada({
           estado: 'AGUARDANDO_DATA',
           mensagemUsuario: mensagem,
-          dadosOrcamento: {
+          dadosOrcamento: construirResumoAtendimento({
+            estado: 'AGUARDANDO_DATA',
             acao: 'confirmar_pre_reserva',
-            dataBr: formatarDataBr(data),
-            periodoTxt,
-          },
+            dados: {
+              dataBr: formatarDataBr(data),
+              periodoTxt,
+            },
+          }),
           clienteTelefone: telefone,
         });
 
@@ -365,7 +427,10 @@ app.post('/webhook', async (req, res) => {
         const respostaStatus = await gerarRespostaHumanizada({
           estado: 'AGUARDANDO_APROVACAO_DONO',
           mensagemUsuario: mensagem,
-          dadosOrcamento: { acao: 'aguardando_aprovacao' },
+          dadosOrcamento: construirResumoAtendimento({
+            estado: 'AGUARDANDO_APROVACAO_DONO',
+            acao: 'aguardando_aprovacao',
+          }),
           clienteTelefone: telefone,
         });
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
@@ -432,8 +497,16 @@ app.post('/webhook', async (req, res) => {
 
       // Hardening: precisa base64 ou messageId
       if (!base64 && !messageId) {
-        const respostaErro =
-          'Não conseguimos processar sua foto agora. Pode reenviar a imagem, por favor?';
+        const respostaErro = await gerarRespostaHumanizada({
+          estado: 'AGUARDANDO_FOTO',
+          mensagemUsuario: '[erro ao receber foto]',
+          dadosOrcamento: construirResumoAtendimento({
+            estado: 'AGUARDANDO_FOTO',
+            acao: 'pedir_foto',
+            dados: { motivo: 'midia_ausente' },
+          }),
+          clienteTelefone: telefone,
+        });
         await enviarMensagem(telefone, respostaErro);
         return res.sendStatus(200);
       }
@@ -461,8 +534,16 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     } catch (err) {
       console.error('❌ Erro no fluxo de imagem:', err.message || err);
-      const respostaErro =
-        'Não conseguimos processar sua foto agora. Pode reenviar a imagem, por favor?';
+      const respostaErro = await gerarRespostaHumanizada({
+        estado: 'AGUARDANDO_FOTO',
+        mensagemUsuario: '[erro ao processar foto]',
+        dadosOrcamento: construirResumoAtendimento({
+          estado: 'AGUARDANDO_FOTO',
+          acao: 'pedir_foto',
+          dados: { motivo: 'erro_processamento' },
+        }),
+        clienteTelefone: telefone,
+      });
       try {
         await enviarMensagem(telefone, respostaErro);
       } catch (sendErr) {
@@ -472,7 +553,7 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
-  return res.status(200).json({ info: 'Evento ignorado' });
+  return res.status(200).json({ ok: true, ignored: 'unsupported_kind' });
 });
 
 app.listen(PORT, () => {

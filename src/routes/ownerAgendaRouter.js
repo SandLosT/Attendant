@@ -14,11 +14,11 @@ function ownerAuth(req, res, next) {
   const [scheme, token] = authHeader.split(' ');
 
   if (!expectedToken) {
-    return res.status(500).json({ erro: 'OWNER_AUTH_TOKEN não configurado' });
+    return res.status(500).json({ error: 'unauthorized' });
   }
 
   if (scheme !== 'Bearer' || !token || token !== expectedToken) {
-    return res.status(401).json({ erro: 'Não autorizado' });
+    return res.status(401).json({ error: 'unauthorized' });
   }
 
   return next();
@@ -52,15 +52,28 @@ function toISODate(dateOrString) {
   return null;
 }
 
+function parsePositiveInt(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.floor(parsed);
+}
+
 router.post('/gerar', async (req, res) => {
   const { dias, capacidade } = req.body || {};
-  const diasGerar = Number(dias) || 30;
-  const capacidadeFinal = Number(capacidade) || 1;
+  const diasGerar = parsePositiveInt(dias) ?? 30;
+  const capacidadeFinal = parsePositiveInt(capacidade) ?? 1;
+
+  if (!diasGerar || !capacidadeFinal) {
+    return res.status(400).json({ erro: 'dias e capacidade devem ser números positivos' });
+  }
 
   const inicio = new Date();
   inicio.setHours(0, 0, 0, 0);
 
   let gerados = 0;
+  let existentes = 0;
 
   for (let i = 0; i < diasGerar; i += 1) {
     const data = new Date(inicio);
@@ -72,14 +85,18 @@ router.post('/gerar', async (req, res) => {
 
     if (slotManha?.criado) {
       gerados += 1;
+    } else {
+      existentes += 1;
     }
 
     if (slotTarde?.criado) {
       gerados += 1;
+    } else {
+      existentes += 1;
     }
   }
 
-  return res.json({ ok: true, gerados });
+  return res.json({ ok: true, gerados, existentes });
 });
 
 router.get('/', async (req, res) => {
