@@ -6,11 +6,16 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "node src/app.js",
+    "pwa:dev": "vite --config src/pwa-owner/vite.config.ts",
+    "pwa:build": "vite build --config src/pwa-owner/vite.config.ts",
     "migrate": "knex migrate:latest",
     "seed": "knex seed:run"
   },
   "dependencies": {
     "axios": "^1.6.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "form-data": "^4.0.0",
@@ -19,5 +24,12 @@
     "mysql2": "^3.15.2",
     "openai": "^4.30.0",
     "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.9",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.6"
   }
 }

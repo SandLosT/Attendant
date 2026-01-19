@@ -1,4 +1,7 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import { processarMensagem } from './usecases/processarMensagem.js';
 import { enviarMensagem, downloadMedia } from './services/wppconnectService.js';
@@ -33,6 +36,9 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const pwaDistPath = path.resolve(__dirname, '../pwa-owner/dist');
 const WEBHOOK_DEDUPE_TTL_MS = Number(process.env.WEBHOOK_DEDUPE_TTL_MS) || 120000;
 const HASH_DEDUPE_TTL_MS = 30000;
 const webhookDedupe = new Map();
@@ -91,6 +97,13 @@ app.use(express.json({ limit: '25mb' }));
 app.use('/upload', imageUploadRouter);
 app.use('/owner/agenda', ownerAgendaRouter);
 app.use('/owner', ownerRouter);
+
+if (fs.existsSync(pwaDistPath)) {
+  app.use('/pwa', express.static(pwaDistPath));
+  app.get(['/pwa', '/pwa/*'], (req, res) => {
+    res.sendFile(path.join(pwaDistPath, 'index.html'));
+  });
+}
 
 app.get('/', (req, res) => {
   res.send('Servidor de atendimento IA rodando');
