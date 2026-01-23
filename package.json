@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "node src/app.js",
+    "build:pwa": "vite build --config src/pwa-owner/vite.config.ts",
     "pwa:dev": "vite --config src/pwa-owner/vite.config.ts",
     "pwa:build": "vite build --config src/pwa-owner/vite.config.ts",
     "migrate": "knex migrate:latest",

@@ -16,15 +16,15 @@ Configure CORS no backend com `OWNER_APP_ORIGIN=http://localhost:5173`.
 ### Produção (build + Express)
 
 ```bash
-npm run pwa:build
+npm run build:pwa
 npm run start
 ```
 
 Quando existir `src/pwa-owner/dist`, o Express serve o PWA em:
 
-- `http://localhost:3001/pwa` (index.html)
-- `http://localhost:3001/pwa/*` (SPA fallback)
-- Assets estáticos em `/pwa/assets/*`
+- `http://localhost:3001/owner/pwa` (index.html)
+- `http://localhost:3001/owner/pwa/*` (SPA fallback)
+- Assets estáticos em `/owner/pwa/assets/*`
 
 ## Testes manuais de agenda
 
