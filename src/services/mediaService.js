@@ -43,7 +43,7 @@ export function saveBase64ToUploads({ base64, mimetype, filename }) {
   const finalName = filename || uniqueName;
 
   const filePath = path.join(uploadDir, uniqueName);
-  const relativePath = path.join(uploadsRelativeDir, uniqueName);
+  const relativePath = path.posix.join(uploadsRelativeDir, uniqueName);
 
   fs.writeFileSync(filePath, cleanBase64, { encoding: 'base64' });
 
