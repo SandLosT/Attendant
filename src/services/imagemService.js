@@ -15,9 +15,18 @@ export async function salvarImagem({
   hash = null,
   embedding = null
 }) {
+  const caminhoNormalizado = typeof caminho === 'string'
+    ? caminho.replace(/\\/g, '/')
+    : caminho;
   console.log(
     '[imagemService] Salvando nova imagem:',
-    JSON.stringify({ clienteId, caminho, nomeOriginal, possuiHash: Boolean(hash), possuiEmbedding: Boolean(embedding) })
+    JSON.stringify({
+      clienteId,
+      caminho: caminhoNormalizado,
+      nomeOriginal,
+      possuiHash: Boolean(hash),
+      possuiEmbedding: Boolean(embedding)
+    })
   );
   if (!clienteId) {
     throw new Error('clienteId é obrigatório para salvar a imagem.');
@@ -25,7 +34,7 @@ export async function salvarImagem({
 
   const payload = {
     cliente_id: clienteId,
-    caminho,
+    caminho: caminhoNormalizado,
     nome_original: nomeOriginal,
   };
 
