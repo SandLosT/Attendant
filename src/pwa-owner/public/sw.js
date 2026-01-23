@@ -1,5 +1,9 @@
 const CACHE_NAME = "owner-pwa-v1";
-const CORE_ASSETS = ["/", "/manifest.webmanifest"];
+const SCOPE_URL = self.registration?.scope ?? "/";
+const CORE_ASSETS = [
+  new URL("./", SCOPE_URL).toString(),
+  new URL("./manifest.webmanifest", SCOPE_URL).toString(),
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
