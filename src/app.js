@@ -155,6 +155,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '25mb' }));
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 app.use('/upload', imageUploadRouter);
 app.use('/owner/agenda', ownerAgendaRouter);
 app.use('/owner', ownerRouter);
