@@ -26,6 +26,21 @@ Quando existir `src/pwa-owner/dist`, o Express serve o PWA em:
 - `http://localhost:3001/owner/pwa/*` (SPA fallback)
 - Assets estáticos em `/owner/pwa/assets/*`
 
+## Endpoints de agenda (owner)
+
+Todos os endpoints exigem `Authorization: Bearer <OWNER_AUTH_TOKEN>`.
+
+- `GET /owner/agenda?from=YYYY-MM-DD&to=YYYY-MM-DD` — lista slots (pode omitir `from/to` para usar os próximos 14 dias).
+- `POST /owner/agenda/gerar` — gera slots (`dias`, `capacidade`, `a_partir_de`).
+- `POST /owner/agenda/bloquear` — bloqueia data/período.
+- `POST /owner/agenda/desbloquear` — desbloqueia data/período.
+
+Exemplo (curl):
+
+```bash
+curl.exe "http://localhost:3001/owner/agenda?from=2025-12-01&to=2025-12-31" -H "Authorization: Bearer <TOKEN>"
+```
+
 ## Testes manuais de agenda
 
 Gerar agenda:
@@ -40,10 +55,16 @@ Ver disponibilidade:
 curl.exe "http://localhost:3001/owner/agenda?from=2025-12-01&to=2025-12-31" -H "Authorization: Bearer <TOKEN>"
 ```
 
-Bloquear/desbloquear slot:
+Bloquear slot:
 
 ```bash
 curl.exe -X POST http://localhost:3001/owner/agenda/bloquear -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data-raw "{\"data\":\"2025-12-05\",\"periodo\":\"MANHA\",\"bloqueado\":true}"
+```
+
+Desbloquear slot:
+
+```bash
+curl.exe -X POST http://localhost:3001/owner/agenda/desbloquear -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data-raw "{\"data\":\"2025-12-05\",\"periodo\":\"MANHA\"}"
 ```
 
 Simular semana cheia:
