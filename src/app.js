@@ -30,7 +30,7 @@ import {
 } from './services/agendaService.js';
 
 import { handleImagemOrcamentoFlow } from './usecases/handleImagemOrcamentoFlow.js';
-import { gerarRespostaHumanizada } from './services/assistantReplyService.js';
+import { gerarRespostaAssistente } from './services/assistantReplyService.js';
 
 dotenv.config();
 
@@ -92,15 +92,6 @@ function normalizarResultadoReserva(ret) {
     return { ...ret, reason: ret.reason || 'INDISPONIVEL' };
   }
   return { ok: false };
-}
-
-function construirResumoAtendimento({ estado, acao, dados = {} }) {
-  return {
-    estado,
-    acao,
-    tom: 'humano_curto',
-    ...dados,
-  };
 }
 
 function shouldIgnoreWebhook(normalized) {
@@ -232,26 +223,25 @@ app.post('/webhook', async (req, res) => {
 
         if (contemNovoOrcamento(mensagem)) {
           await setEstado(cliente.id, 'AGUARDANDO_FOTO');
-          const respostaNovoOrcamento = await gerarRespostaHumanizada({
+          const respostaNovoOrcamento = await gerarRespostaAssistente({
             estado: 'AGUARDANDO_FOTO',
-            mensagemUsuario: mensagem,
-            dadosOrcamento: construirResumoAtendimento({
-              estado: 'AGUARDANDO_FOTO',
+            mensagemCliente: mensagem,
+            objetivo: 'pedir foto para novo orçamento',
+            dados: {
               acao: 'pedir_foto',
-            }),
-            clienteTelefone: telefone,
+              motivo: 'novo_orcamento',
+            },
           });
           await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
           await enviarMensagem(telefone, respostaNovoOrcamento);
         } else {
-          const respostaFinalizado = await gerarRespostaHumanizada({
+          const respostaFinalizado = await gerarRespostaAssistente({
             estado: 'FINALIZADO',
-            mensagemUsuario: mensagem,
-            dadosOrcamento: construirResumoAtendimento({
-              estado: 'FINALIZADO',
+            mensagemCliente: mensagem,
+            objetivo: 'atendimento finalizado',
+            dados: {
               acao: 'finalizado',
-            }),
-            clienteTelefone: telefone,
+            },
           });
           await salvarMensagem(cliente.id, respostaFinalizado, 'resposta');
           await enviarMensagem(telefone, respostaFinalizado);
@@ -262,14 +252,13 @@ app.post('/webhook', async (req, res) => {
 
       if (atendimento?.estado === 'AGUARDANDO_FOTO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaFoto = await gerarRespostaHumanizada({
+        const respostaFoto = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_FOTO',
-          mensagemUsuario: mensagem,
-          dadosOrcamento: construirResumoAtendimento({
-            estado: 'AGUARDANDO_FOTO',
+          mensagemCliente: mensagem,
+          objetivo: 'pedir foto',
+          dados: {
             acao: 'pedir_foto',
-          }),
-          clienteTelefone: telefone,
+          },
         });
         await salvarMensagem(cliente.id, respostaFoto, 'resposta');
         await enviarMensagem(telefone, respostaFoto);
@@ -286,14 +275,13 @@ app.post('/webhook', async (req, res) => {
         const periodoPreferido = normalizarPeriodo(periodo);
 
         if (!data) {
-          const respostaData = await gerarRespostaHumanizada({
+          const respostaData = await gerarRespostaAssistente({
             estado: 'AGUARDANDO_DATA',
-            mensagemUsuario: mensagem,
-            dadosOrcamento: construirResumoAtendimento({
-              estado: 'AGUARDANDO_DATA',
+            mensagemCliente: mensagem,
+            objetivo: 'pedir data',
+            dados: {
               acao: 'pedir_data',
-            }),
-            clienteTelefone: telefone,
+            },
           });
           await salvarMensagem(cliente.id, respostaData, 'resposta');
           await enviarMensagem(telefone, respostaData);
@@ -321,32 +309,28 @@ app.post('/webhook', async (req, res) => {
           if (resultadoReserva.reason === 'SEMANA_CHEIA') {
             const sugestao = await findProximaVagaAPartir(data, periodoPreferido);
             if (sugestao) {
-              const respostaSemanaCheia = await gerarRespostaHumanizada({
+              const respostaSemanaCheia = await gerarRespostaAssistente({
                 estado: 'AGUARDANDO_DATA',
-                mensagemUsuario: mensagem,
-                dadosOrcamento: construirResumoAtendimento({
-                  estado: 'AGUARDANDO_DATA',
+                mensagemCliente: mensagem,
+                objetivo: 'sugerir vaga',
+                dados: {
                   acao: 'sugerir_vaga',
-                  dados: {
-                    dataBr: formatarDataBr(sugestao.data),
-                    periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
-                  },
-                }),
-                clienteTelefone: telefone,
+                  dataBr: formatarDataBr(sugestao.data),
+                  periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
+                },
               });
               await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
               await enviarMensagem(telefone, respostaSemanaCheia);
               return res.sendStatus(200);
             }
 
-            const respostaSemanaCheia = await gerarRespostaHumanizada({
+            const respostaSemanaCheia = await gerarRespostaAssistente({
               estado: 'AGUARDANDO_DATA',
-              mensagemUsuario: mensagem,
-              dadosOrcamento: construirResumoAtendimento({
-                estado: 'AGUARDANDO_DATA',
+              mensagemCliente: mensagem,
+              objetivo: 'semana cheia',
+              dados: {
                 acao: 'semana_cheia',
-              }),
-              clienteTelefone: telefone,
+              },
             });
             await salvarMensagem(cliente.id, respostaSemanaCheia, 'resposta');
             await enviarMensagem(telefone, respostaSemanaCheia);
@@ -360,32 +344,28 @@ app.post('/webhook', async (req, res) => {
           const sugestao = await findProximaVagaAPartir(proximaData, periodoPreferido);
 
           if (sugestao) {
-            const respostaIndisponivel = await gerarRespostaHumanizada({
+            const respostaIndisponivel = await gerarRespostaAssistente({
               estado: 'AGUARDANDO_DATA',
-              mensagemUsuario: mensagem,
-              dadosOrcamento: construirResumoAtendimento({
-                estado: 'AGUARDANDO_DATA',
+              mensagemCliente: mensagem,
+              objetivo: 'sugerir vaga',
+              dados: {
                 acao: 'sugerir_vaga',
-                dados: {
-                  dataBr: formatarDataBr(sugestao.data),
-                  periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
-                },
-              }),
-              clienteTelefone: telefone,
+                dataBr: formatarDataBr(sugestao.data),
+                periodoTxt: sugestao.periodo === 'MANHA' ? 'manhã' : 'tarde',
+              },
             });
             await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
             await enviarMensagem(telefone, respostaIndisponivel);
             return res.sendStatus(200);
           }
 
-          const respostaIndisponivel = await gerarRespostaHumanizada({
+          const respostaIndisponivel = await gerarRespostaAssistente({
             estado: 'AGUARDANDO_DATA',
-            mensagemUsuario: mensagem,
-            dadosOrcamento: construirResumoAtendimento({
-              estado: 'AGUARDANDO_DATA',
+            mensagemCliente: mensagem,
+            objetivo: 'indisponivel',
+            dados: {
               acao: 'indisponivel',
-            }),
-            clienteTelefone: telefone,
+            },
           });
           await salvarMensagem(cliente.id, respostaIndisponivel, 'resposta');
           await enviarMensagem(telefone, respostaIndisponivel);
@@ -401,18 +381,15 @@ app.post('/webhook', async (req, res) => {
         await setEstado(cliente.id, 'AGUARDANDO_APROVACAO_DONO');
 
         const periodoTxt = periodoReservado === 'TARDE' ? 'tarde' : 'manhã';
-        const respostaConfirmacao = await gerarRespostaHumanizada({
+        const respostaConfirmacao = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_DATA',
-          mensagemUsuario: mensagem,
-          dadosOrcamento: construirResumoAtendimento({
-            estado: 'AGUARDANDO_DATA',
+          mensagemCliente: mensagem,
+          objetivo: 'confirmar pré-reserva',
+          dados: {
             acao: 'confirmar_pre_reserva',
-            dados: {
-              dataBr: formatarDataBr(data),
-              periodoTxt,
-            },
-          }),
-          clienteTelefone: telefone,
+            dataBr: formatarDataBr(data),
+            periodoTxt,
+          },
         });
 
         await salvarMensagem(cliente.id, respostaConfirmacao, 'resposta');
@@ -424,14 +401,13 @@ app.post('/webhook', async (req, res) => {
       // Enquanto aguarda aprovação do dono
       if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaStatus = await gerarRespostaHumanizada({
+        const respostaStatus = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_APROVACAO_DONO',
-          mensagemUsuario: mensagem,
-          dadosOrcamento: construirResumoAtendimento({
-            estado: 'AGUARDANDO_APROVACAO_DONO',
+          mensagemCliente: mensagem,
+          objetivo: 'aguardar aprovação do responsável',
+          dados: {
             acao: 'aguardando_aprovacao',
-          }),
-          clienteTelefone: telefone,
+          },
         });
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
         await enviarMensagem(telefone, respostaStatus);
@@ -497,15 +473,11 @@ app.post('/webhook', async (req, res) => {
 
       // Hardening: precisa base64 ou messageId
       if (!base64 && !messageId) {
-        const respostaErro = await gerarRespostaHumanizada({
+        const respostaErro = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_FOTO',
-          mensagemUsuario: '[erro ao receber foto]',
-          dadosOrcamento: construirResumoAtendimento({
-            estado: 'AGUARDANDO_FOTO',
-            acao: 'pedir_foto',
-            dados: { motivo: 'midia_ausente' },
-          }),
-          clienteTelefone: telefone,
+          mensagemCliente: '[erro ao receber foto]',
+          objetivo: 'pedir foto',
+          dados: { motivo: 'midia_ausente' },
         });
         await enviarMensagem(telefone, respostaErro);
         return res.sendStatus(200);
@@ -534,15 +506,11 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     } catch (err) {
       console.error('❌ Erro no fluxo de imagem:', err.message || err);
-      const respostaErro = await gerarRespostaHumanizada({
+      const respostaErro = await gerarRespostaAssistente({
         estado: 'AGUARDANDO_FOTO',
-        mensagemUsuario: '[erro ao processar foto]',
-        dadosOrcamento: construirResumoAtendimento({
-          estado: 'AGUARDANDO_FOTO',
-          acao: 'pedir_foto',
-          dados: { motivo: 'erro_processamento' },
-        }),
-        clienteTelefone: telefone,
+        mensagemCliente: '[erro ao processar foto]',
+        objetivo: 'pedir foto',
+        dados: { motivo: 'erro_processamento' },
       });
       try {
         await enviarMensagem(telefone, respostaErro);
