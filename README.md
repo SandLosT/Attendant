@@ -11,7 +11,7 @@ npm run pwa:dev
 ```
 
 O Vite expõe o PWA em `http://localhost:5173` para desenvolvimento local.
-Configure CORS no backend com `OWNER_APP_ORIGIN=http://localhost:5173`.
+O proxy do Vite encaminha `/owner` e `/uploads` para o backend em `http://localhost:3001`, evitando CORS.
 
 ### Produção (build + Express)
 
@@ -72,3 +72,11 @@ Simular semana cheia:
 1. Faça `INSERT/UPDATE` em `agenda_slots` somando `reservados` total >= 5 naquela semana.
 2. Tente reservar via WhatsApp.
 3. Deve sugerir a próxima vaga na semana seguinte.
+
+## Teste manual de imagens de orçamento
+
+Após gerar um orçamento com imagem, abra no navegador:
+
+```text
+http://localhost:3001/uploads/<arquivo>
+```

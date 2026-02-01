@@ -10,6 +10,12 @@ export default defineConfig({
   base: "/pwa/",
   plugins: [react()],
   publicDir: "public",
+  server: {
+    proxy: {
+      "/owner": "http://localhost:3001",
+      "/uploads": "http://localhost:3001",
+    },
+  },
   build: {
     outDir: resolve(__dirname, "dist"),
     emptyOutDir: true,
