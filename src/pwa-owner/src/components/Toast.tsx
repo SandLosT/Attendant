@@ -4,12 +4,12 @@ type ToastProps = {
   onClose: () => void;
 };
 
-const Toast = ({ message, variant = "success", onClose }: ToastProps) => {
+const Toast = ({ message, variant, onClose }: ToastProps) => {
   return (
-    <div className={`toast toast-${variant}`} role="status">
+    <div className={`toast ${variant === "error" ? "toast-error" : ""}`}>
       <span>{message}</span>
-      <button type="button" className="toast-close" onClick={onClose}>
-        ×
+      <button type="button" className="btn btn-ghost" onClick={onClose}>
+        ✕
       </button>
     </div>
   );
