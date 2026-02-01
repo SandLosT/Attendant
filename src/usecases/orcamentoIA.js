@@ -23,5 +23,6 @@ ${listaImagens || 'Nenhuma'}
 Gere uma resposta clara, sem repetir, e com base no que a oficina oferece. Se for um serviço não oferecido, diga isso claramente.
 `;
 
-  return gerarResposta(prompt.trim());
+  const resposta = await gerarResposta(prompt.trim());
+  return resposta?.ok ? resposta.content : '';
 }

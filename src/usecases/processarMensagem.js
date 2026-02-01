@@ -84,8 +84,17 @@ export async function processarMensagem(telefone, mensagem) {
       estadoAtendimento: 'Não informado',
     },
   });
+  const respostaFinal = resposta?.ok ? resposta.content : '';
+  if (!respostaFinal) {
+    const respostaPadrao =
+      'Obrigada pela mensagem! Já vou verificar e te respondo. Se puder, envie uma foto do amassado para eu ajudar melhor.';
+    await salvarMensagem(cliente.id, respostaPadrao, 'resposta');
+    console.log('[processarMensagem] OpenAI indisponível; resposta padrão registrada.');
+    return respostaPadrao;
+  }
+
   console.log('[processarMensagem] Resposta gerada pela OpenAI. Persistindo no histórico.');
-  await salvarMensagem(cliente.id, resposta, 'resposta');
+  await salvarMensagem(cliente.id, respostaFinal, 'resposta');
   console.log('[processarMensagem] Resposta registrada no histórico. Processo concluído.');
-  return resposta;
+  return respostaFinal;
 }

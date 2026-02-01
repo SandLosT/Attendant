@@ -15,7 +15,10 @@ function getOpenAIClient() {
   }
 
   if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: process.env.OPENAI_BASE_URL || undefined,
+    });
   }
 
   return openaiClient;
@@ -27,11 +30,11 @@ function getOpenAIModel() {
 
 function getOpenAITemperature() {
   const parsed = Number(process.env.OPENAI_TEMPERATURE);
-  return Number.isFinite(parsed) ? parsed : 0.6;
+  return Number.isFinite(parsed) ? parsed : 0.7;
 }
 
-function respostaHumanaFallback() {
-  return 'Obrigada pela mensagem! Já vou verificar e te respondo. Se puder, envie uma foto do amassado para eu ajudar melhor.';
+function respostaSemChave() {
+  return { ok: false, reason: 'NO_API_KEY' };
 }
 
 export function openAIKeyDisponivel() {
@@ -40,12 +43,12 @@ export function openAIKeyDisponivel() {
 
 export async function gerarResposta(prompt) {
   if (!hasOpenAIKey()) {
-    return respostaHumanaFallback();
+    return respostaSemChave();
   }
 
   const openai = getOpenAIClient();
   if (!openai) {
-    return respostaHumanaFallback();
+    return respostaSemChave();
   }
 
   try {
@@ -54,21 +57,21 @@ export async function gerarResposta(prompt) {
       messages: [{ role: 'user', content: prompt }],
       temperature: getOpenAITemperature(),
     });
-    return completion.choices[0].message.content.trim();
+    return { ok: true, content: completion.choices[0].message.content.trim() };
   } catch (err) {
     console.error('Erro na OpenAI:', err);
-    return respostaHumanaFallback();
+    return { ok: false, reason: 'OPENAI_ERROR', error: err };
   }
 }
 
 export async function gerarRespostaHumana({ telefone, mensagem, contexto } = {}) {
   if (!hasOpenAIKey()) {
-    return respostaHumanaFallback();
+    return respostaSemChave();
   }
 
   const openai = getOpenAIClient();
   if (!openai) {
-    return respostaHumanaFallback();
+    return respostaSemChave();
   }
 
   const contextoLoja = contexto?.loja || 'Sem informações da loja.';
@@ -109,21 +112,21 @@ Cliente (${telefone || 'sem telefone informado'}): "${mensagem || ''}"
       ],
       temperature: getOpenAITemperature(),
     });
-    return completion.choices[0].message.content.trim();
+    return { ok: true, content: completion.choices[0].message.content.trim() };
   } catch (err) {
     console.error('Erro na OpenAI:', err);
-    return respostaHumanaFallback();
+    return { ok: false, reason: 'OPENAI_ERROR', error: err };
   }
 }
 
 export async function gerarRespostaChat({ messages = [], fallback = '' } = {}) {
   if (!hasOpenAIKey()) {
-    return fallback;
+    return respostaSemChave();
   }
 
   const openai = getOpenAIClient();
   if (!openai) {
-    return fallback;
+    return respostaSemChave();
   }
 
   try {
@@ -132,9 +135,9 @@ export async function gerarRespostaChat({ messages = [], fallback = '' } = {}) {
       messages,
       temperature: getOpenAITemperature(),
     });
-    return completion.choices[0].message.content.trim();
+    return { ok: true, content: completion.choices[0].message.content.trim() };
   } catch (err) {
     console.error('Erro na OpenAI:', err);
-    return fallback;
+    return { ok: false, reason: 'OPENAI_ERROR', error: err };
   }
 }

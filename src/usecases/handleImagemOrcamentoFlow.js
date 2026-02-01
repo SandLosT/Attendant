@@ -10,7 +10,7 @@ import {
   obterEmbeddingDoServico,
   obterEstimativaOrcamentoPorEmbedding,
 } from '../utils/embedClient.js';
-import gerarRespostaAssistente from './gerarRespostaAssistente.js';
+import { gerarRespostaAssistente } from '../services/assistantReplyService.js';
 
 function normalizarStatusFaz(valor) {
   return (
@@ -76,23 +76,20 @@ export async function handleImagemOrcamentoFlow({
       ? valorNumerico.toFixed(2)
       : valorBruto || '---';
 
-  const draft = passouThreshold && statusFaz
-    ? `Pela foto, conseguimos fazer sim. O orçamento estimado fica em R$ ${valorFormatado}. Qual dia você consegue deixar o carro na oficina?`
-    : 'Precisamos que um profissional avalie melhor. Vou encaminhar para o responsável e já retorno, tudo bem?';
-
   const resposta = await gerarRespostaAssistente({
-    telefone,
     estado: atendimentoEstado,
-    mensagemUsuario: '[imagem]',
-    objetivo: passouThreshold && statusFaz ? 'pedir data dd/mm' : 'avisar avaliação humana',
+    mensagemCliente: '[imagem]',
+    objetivo: passouThreshold && statusFaz
+      ? 'informar orçamento estimado e pedir data'
+      : 'explicar que precisa avaliação humana / encaminhar pro responsável',
     dados: {
       valor_estimado: valorFormatado,
-      score: estimate?.best_match_score,
+      match_score: estimate?.best_match_score,
+      peca: estimate?.best_match_peca || estimate?.peca,
       status_faz: estimate?.best_match_status_faz,
       threshold_passed: estimate?.threshold_passed,
       ref_image_id: estimate?.ref_image_id,
     },
-    draft,
   });
 
   await salvarMensagem(cliente.id, resposta, 'resposta');
