@@ -210,6 +210,13 @@ app.post('/webhook', async (req, res) => {
     try {
       const cliente = await obterOuCriarCliente(telefone);
       const atendimento = await getOrCreateAtendimento(cliente.id);
+      let estadoEfetivo = atendimento?.estado;
+
+      if (estadoEfetivo === 'AGUARDANDO_FOTO' && !atendimento?.orcamento_id_atual) {
+        estadoEfetivo = 'LIVRE';
+        await setEstado(cliente.id, 'LIVRE');
+      }
+
       const modoManualAtivo = isManualAtivo(atendimento);
 
       // Dono assumiu: bot não responde
@@ -219,7 +226,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       // Atendimento finalizado: só volta a falar se cliente indicar "novo orçamento"
-      if (atendimento?.estado === 'FINALIZADO') {
+      if (estadoEfetivo === 'FINALIZADO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         if (contemNovoOrcamento(mensagem)) {
@@ -251,7 +258,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      if (atendimento?.estado === 'AGUARDANDO_FOTO') {
+      if (estadoEfetivo === 'AGUARDANDO_FOTO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
         const respostaFoto = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_FOTO',
@@ -269,7 +276,7 @@ app.post('/webhook', async (req, res) => {
       // ----------------------------
       // AGUARDANDO_DATA
       // ----------------------------
-      if (atendimento?.estado === 'AGUARDANDO_DATA') {
+      if (estadoEfetivo === 'AGUARDANDO_DATA') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
@@ -400,8 +407,25 @@ app.post('/webhook', async (req, res) => {
       }
 
       // Enquanto aguarda aprovação do dono
-      if (atendimento?.estado === 'AGUARDANDO_APROVACAO_DONO') {
+      if (estadoEfetivo === 'AGUARDANDO_APROVACAO_DONO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        if (contemNovoOrcamento(mensagem)) {
+          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
+          const respostaNovoOrcamento = await gerarRespostaAssistente({
+            estado: 'AGUARDANDO_FOTO',
+            mensagemCliente: mensagem,
+            objetivo: 'pedir foto para novo orçamento',
+            dados: {
+              acao: 'pedir_foto',
+              motivo: 'novo_orcamento',
+            },
+          });
+          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
+          await enviarMensagem(telefone, respostaNovoOrcamento);
+          return res.sendStatus(200);
+        }
+
         const respostaStatus = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_APROVACAO_DONO',
           mensagemCliente: mensagem,
@@ -412,6 +436,31 @@ app.post('/webhook', async (req, res) => {
         });
         await salvarMensagem(cliente.id, respostaStatus, 'resposta');
         await enviarMensagem(telefone, respostaStatus);
+        return res.sendStatus(200);
+      }
+
+      if (estadoEfetivo === 'LIVRE') {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        if (contemNovoOrcamento(mensagem)) {
+          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
+          const respostaNovoOrcamento = await gerarRespostaAssistente({
+            estado: 'AGUARDANDO_FOTO',
+            mensagemCliente: mensagem,
+            objetivo: 'pedir foto para novo orçamento',
+            dados: {
+              acao: 'pedir_foto',
+              motivo: 'novo_orcamento',
+            },
+          });
+          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
+          await enviarMensagem(telefone, respostaNovoOrcamento);
+          return res.sendStatus(200);
+        }
+
+        const respostaLivre = await processarMensagem(telefone, mensagem);
+        await salvarMensagem(cliente.id, respostaLivre, 'resposta');
+        await enviarMensagem(telefone, respostaLivre);
         return res.sendStatus(200);
       }
 

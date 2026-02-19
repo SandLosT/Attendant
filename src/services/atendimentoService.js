@@ -19,7 +19,7 @@ export async function getOrCreateAtendimento(clienteId) {
     if (!existente.estado) {
       await db('atendimentos')
         .where({ cliente_id: clienteId })
-        .update({ estado: 'AGUARDANDO_FOTO' });
+        .update({ estado: 'LIVRE' });
       return getAtendimentoByClienteId(clienteId);
     }
 
@@ -29,7 +29,7 @@ export async function getOrCreateAtendimento(clienteId) {
   try {
     const ids = await db('atendimentos').insert({
       cliente_id: clienteId,
-      estado: 'AGUARDANDO_FOTO',
+      estado: 'LIVRE',
       modo: 'AUTO',
       orcamento_id_atual: null,
     });
