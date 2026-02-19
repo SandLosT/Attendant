@@ -1,5 +1,7 @@
 import { db } from '../database/index.js';
 
+export const ESTADO_EM_CONVERSA = 'EM_CONVERSA';
+
 export async function getAtendimentoByClienteId(clienteId) {
   if (!clienteId) {
     return null;
@@ -19,7 +21,7 @@ export async function getOrCreateAtendimento(clienteId) {
     if (!existente.estado) {
       await db('atendimentos')
         .where({ cliente_id: clienteId })
-        .update({ estado: 'AUTO', modo: existente?.modo || 'AUTO' });
+        .update({ estado: ESTADO_EM_CONVERSA, modo: existente?.modo || 'AUTO' });
       return getAtendimentoByClienteId(clienteId);
     }
 
@@ -29,7 +31,7 @@ export async function getOrCreateAtendimento(clienteId) {
   try {
     const ids = await db('atendimentos').insert({
       cliente_id: clienteId,
-      estado: 'AUTO',
+      estado: ESTADO_EM_CONVERSA,
       modo: 'AUTO',
       orcamento_id_atual: null,
     });

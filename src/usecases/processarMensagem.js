@@ -68,7 +68,7 @@ export async function processarMensagem(telefone, mensagem) {
 
   if (!openAIKeyDisponivel()) {
     const respostaPadrao =
-      'Obrigada pela mensagem! Já vou verificar e te respondo. Se puder, envie uma foto do amassado para eu ajudar melhor.';
+      'Obrigada pela mensagem! Já vou verificar e te respondo em instantes. Como posso te ajudar hoje?';
     await salvarMensagem(cliente.id, respostaPadrao, 'resposta');
     console.log('[processarMensagem] OpenAI sem chave; resposta padrão registrada.');
     return respostaPadrao;
@@ -87,7 +87,7 @@ export async function processarMensagem(telefone, mensagem) {
   const respostaFinal = resposta?.ok ? resposta.content : '';
   if (!respostaFinal) {
     const respostaPadrao =
-      'Obrigada pela mensagem! Já vou verificar e te respondo. Se puder, envie uma foto do amassado para eu ajudar melhor.';
+      'Obrigada pela mensagem! Já vou verificar e te respondo em instantes. Como posso te ajudar hoje?';
     await salvarMensagem(cliente.id, respostaPadrao, 'resposta');
     console.log('[processarMensagem] OpenAI indisponível; resposta padrão registrada.');
     return respostaPadrao;
