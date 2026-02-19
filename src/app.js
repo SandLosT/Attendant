@@ -56,9 +56,24 @@ const NOVO_ORCAMENTO_TERMOS = [
   'cotacao',
 ];
 
+const TERMOS_CANCELAMENTO_ORCAMENTO = [
+  'nao quero',
+  'não quero',
+  'cancelar',
+  'deixa pra lá',
+  'deixa pra la',
+  'sem orçamento',
+  'sem orcamento',
+];
+
 function contemNovoOrcamento(texto = '') {
   const textoNormalizado = texto.toLowerCase();
   return NOVO_ORCAMENTO_TERMOS.some((termo) => textoNormalizado.includes(termo));
+}
+
+function contemCancelamentoOrcamento(texto = '') {
+  const textoNormalizado = texto.toLowerCase();
+  return TERMOS_CANCELAMENTO_ORCAMENTO.some((termo) => textoNormalizado.includes(termo));
 }
 
 function formatarDataBr(isoDate) {
@@ -212,9 +227,13 @@ app.post('/webhook', async (req, res) => {
       const atendimento = await getOrCreateAtendimento(cliente.id);
       let estadoEfetivo = atendimento?.estado;
 
-      if (estadoEfetivo === 'AGUARDANDO_FOTO' && !atendimento?.orcamento_id_atual) {
-        estadoEfetivo = 'LIVRE';
-        await setEstado(cliente.id, 'LIVRE');
+      if (
+        estadoEfetivo === 'AGUARDANDO_FOTO'
+        && !atendimento?.orcamento_id_atual
+        && !contemNovoOrcamento(mensagem)
+      ) {
+        await setEstado(cliente.id, 'AUTO');
+        estadoEfetivo = 'AUTO';
       }
 
       const modoManualAtivo = isManualAtivo(atendimento);
@@ -258,8 +277,41 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
+      if (estadoEfetivo === 'AUTO' && contemNovoOrcamento(mensagem)) {
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+        await setEstado(cliente.id, 'AGUARDANDO_FOTO');
+        const respostaNovoOrcamento = await gerarRespostaAssistente({
+          estado: 'AGUARDANDO_FOTO',
+          mensagemCliente: mensagem,
+          objetivo: 'pedir foto para novo orçamento',
+          dados: {
+            acao: 'pedir_foto',
+            motivo: 'novo_orcamento',
+          },
+        });
+        await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
+        await enviarMensagem(telefone, respostaNovoOrcamento);
+        return res.sendStatus(200);
+      }
+
       if (estadoEfetivo === 'AGUARDANDO_FOTO') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        if (contemCancelamentoOrcamento(mensagem)) {
+          await setEstado(cliente.id, 'AUTO');
+          const respostaCancelamento = await gerarRespostaAssistente({
+            estado: 'AUTO',
+            mensagemCliente: mensagem,
+            objetivo: 'cancelamento de orçamento',
+            dados: {
+              acao: 'cancelar_orcamento',
+            },
+          });
+          await salvarMensagem(cliente.id, respostaCancelamento, 'resposta');
+          await enviarMensagem(telefone, respostaCancelamento);
+          return res.sendStatus(200);
+        }
+
         const respostaFoto = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_FOTO',
           mensagemCliente: mensagem,
@@ -278,6 +330,21 @@ app.post('/webhook', async (req, res) => {
       // ----------------------------
       if (estadoEfetivo === 'AGUARDANDO_DATA') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        if (contemCancelamentoOrcamento(mensagem)) {
+          await setEstado(cliente.id, 'AUTO');
+          const respostaCancelamento = await gerarRespostaAssistente({
+            estado: 'AUTO',
+            mensagemCliente: mensagem,
+            objetivo: 'cancelamento de orçamento',
+            dados: {
+              acao: 'cancelar_orcamento',
+            },
+          });
+          await salvarMensagem(cliente.id, respostaCancelamento, 'resposta');
+          await enviarMensagem(telefone, respostaCancelamento);
+          return res.sendStatus(200);
+        }
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
         const periodoPreferido = normalizarPeriodo(periodo);
@@ -439,7 +506,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      if (estadoEfetivo === 'LIVRE') {
+      if (estadoEfetivo === 'AUTO' || estadoEfetivo === 'LIVRE') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         if (contemNovoOrcamento(mensagem)) {
