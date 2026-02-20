@@ -1,6 +1,6 @@
 import { db } from '../database/index.js';
 
-export const ESTADO_EM_CONVERSA = 'EM_CONVERSA';
+export const ESTADO_EM_CONVERSA = 'ABERTO';
 
 export async function getAtendimentoByClienteId(clienteId) {
   if (!clienteId) {
@@ -21,7 +21,11 @@ export async function getOrCreateAtendimento(clienteId) {
     if (!existente.estado) {
       await db('atendimentos')
         .where({ cliente_id: clienteId })
-        .update({ estado: ESTADO_EM_CONVERSA, modo: existente?.modo || 'AUTO' });
+        .update({
+        estado: ESTADO_EM_CONVERSA,
+        modo: existente?.modo || 'AUTO',
+        orcamento_id_atual: existente?.orcamento_id_atual ?? null,
+      });
       return getAtendimentoByClienteId(clienteId);
     }
 

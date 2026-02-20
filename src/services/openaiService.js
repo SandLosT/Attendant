@@ -24,13 +24,9 @@ function getOpenAIClient() {
   return openaiClient;
 }
 
-function getOpenAIModel() {
-  return process.env.OPENAI_MODEL || 'gpt-4o-mini';
-}
-
 function getOpenAITemperature() {
-  const parsed = Number(process.env.OPENAI_TEMPERATURE);
-  return Number.isFinite(parsed) ? parsed : 0.7;
+  const temperature = Number(process.env.OPENAI_TEMPERATURE ?? 0.7);
+  return Number.isFinite(temperature) ? temperature : 0.7;
 }
 
 function respostaSemChave() {
@@ -52,10 +48,12 @@ export async function gerarResposta(prompt) {
   }
 
   try {
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const temperature = Number(process.env.OPENAI_TEMPERATURE ?? 0.7);
     const completion = await openai.chat.completions.create({
-      model: getOpenAIModel(),
+      model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: getOpenAITemperature(),
+      temperature: Number.isFinite(temperature) ? temperature : getOpenAITemperature(),
     });
     return { ok: true, content: completion.choices[0].message.content.trim() };
   } catch (err) {
@@ -104,13 +102,15 @@ Cliente (${telefone || 'sem telefone informado'}): "${mensagem || ''}"
 `.trim();
 
   try {
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const temperature = Number(process.env.OPENAI_TEMPERATURE ?? 0.7);
     const completion = await openai.chat.completions.create({
-      model: getOpenAIModel(),
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: getOpenAITemperature(),
+      temperature: Number.isFinite(temperature) ? temperature : getOpenAITemperature(),
     });
     return { ok: true, content: completion.choices[0].message.content.trim() };
   } catch (err) {
@@ -130,10 +130,12 @@ export async function gerarRespostaChat({ messages = [], fallback = '' } = {}) {
   }
 
   try {
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const temperature = Number(process.env.OPENAI_TEMPERATURE ?? 0.7);
     const completion = await openai.chat.completions.create({
-      model: getOpenAIModel(),
+      model,
       messages,
-      temperature: getOpenAITemperature(),
+      temperature: Number.isFinite(temperature) ? temperature : getOpenAITemperature(),
     });
     return { ok: true, content: completion.choices[0].message.content.trim() };
   } catch (err) {

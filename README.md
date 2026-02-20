@@ -80,3 +80,20 @@ Após gerar um orçamento com imagem, abra no navegador:
 ```text
 http://localhost:3001/uploads/<arquivo>
 ```
+
+## Testes manuais do fluxo de atendimento
+
+### Teste A — “Olá” não pede foto
+
+1. Cliente envia: `Olá`.
+2. Esperado: resposta normal da IA, sem mensagem automática fixa pedindo foto.
+
+### Teste B — Pedido explícito de orçamento pede foto
+
+1. Cliente envia: `Quero um orçamento`.
+2. Esperado: a IA conduz a conversa de orçamento, pedindo foto e detalhes de forma natural.
+
+### Teste C — Envio de imagem cria orçamento e muda estado
+
+1. Cliente envia uma imagem (via `/upload` ou WhatsApp webhook de imagem).
+2. Esperado: orçamento criado e atendimento transita para estado controlado (`AGUARDANDO_DATA` ou `AGUARDANDO_APROVACAO_DONO`).
