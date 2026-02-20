@@ -264,7 +264,7 @@ app.post('/webhook', async (req, res) => {
     try {
       const cliente = await obterOuCriarCliente(telefone);
       let atendimento = await getAtendimentoByClienteId(cliente.id);
-      const estadoEfetivo = atendimento?.estado;
+      const estadoEfetivo = atendimento?.estado === 'AGUARDANDO_FOTO' ? ESTADO_EM_CONVERSA : atendimento?.estado;
       const modoManualAtivo = isManualAtivo(atendimento);
 
       // Dono assumiu: bot não responde
@@ -276,20 +276,6 @@ app.post('/webhook', async (req, res) => {
       if (!atendimento) {
         if (temIntencaoOrcamento(mensagem) && !contemCancelamentoOrcamento(mensagem)) {
           atendimento = await getOrCreateAtendimento(cliente.id);
-          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
-          const respostaNovoOrcamento = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'pedir foto para orçamento',
-            dados: {
-              acao: 'pedir_foto',
-              motivo: 'intencao_orcamento',
-            },
-          });
-          await salvarMensagem(cliente.id, mensagem, 'entrada');
-          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
-          await enviarMensagem(telefone, respostaNovoOrcamento);
-          return res.sendStatus(200);
         }
 
         const respostaInicial = await processarMensagem(telefone, mensagem);
@@ -299,73 +285,28 @@ app.post('/webhook', async (req, res) => {
 
       // Atendimento finalizado: só volta ao fluxo de orçamento se cliente indicar novo orçamento
       if (estadoEfetivo === 'FINALIZADO') {
-        await salvarMensagem(cliente.id, mensagem, 'entrada');
-
-        if (temIntencaoOrcamento(mensagem)) {
-          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
-          const respostaNovoOrcamento = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'pedir foto para novo orçamento',
-            dados: {
-              acao: 'pedir_foto',
-              motivo: 'novo_orcamento',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
-          await enviarMensagem(telefone, respostaNovoOrcamento);
-        } else {
-          const respostaFinalizado = await gerarRespostaAssistente({
-            estado: 'FINALIZADO',
-            mensagemCliente: mensagem,
-            objetivo: 'atendimento finalizado',
-            dados: {
-              acao: 'finalizado',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaFinalizado, 'resposta');
-          await enviarMensagem(telefone, respostaFinalizado);
-        }
-
-        return res.sendStatus(200);
-      }
-
-      if (estadoEfetivo === 'AGUARDANDO_FOTO') {
-        if (contemCancelamentoOrcamento(mensagem)) {
-          await salvarMensagem(cliente.id, mensagem, 'entrada');
+        if (temIntencaoOrcamento(mensagem) && !contemCancelamentoOrcamento(mensagem)) {
           await setEstado(cliente.id, ESTADO_EM_CONVERSA);
-          const respostaCancelamento = await gerarRespostaAssistente({
-            estado: ESTADO_EM_CONVERSA,
-            mensagemCliente: mensagem,
-            objetivo: 'cancelamento de orçamento e continuidade da conversa',
-            dados: {
-              acao: 'cancelar_orcamento',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaCancelamento, 'resposta');
-          await enviarMensagem(telefone, respostaCancelamento);
-          return res.sendStatus(200);
-        }
-
-        if (!temIntencaoOrcamento(mensagem) || mensagemEhSoCumprimento(mensagem)) {
-          const respostaLivre = await processarMensagem(telefone, mensagem);
-          await enviarMensagem(telefone, respostaLivre);
+          const respostaNovoOrcamento = await processarMensagem(telefone, mensagem);
+          await enviarMensagem(telefone, respostaNovoOrcamento);
           return res.sendStatus(200);
         }
 
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-        const respostaFoto = await gerarRespostaAssistente({
-          estado: 'AGUARDANDO_FOTO',
+        const respostaFinalizado = await gerarRespostaAssistente({
+          estado: 'FINALIZADO',
           mensagemCliente: mensagem,
-          objetivo: 'pedir foto com linguagem humana e pedir parte do carro',
+          objetivo: 'atendimento finalizado',
           dados: {
-            acao: 'pedir_foto',
+            acao: 'finalizado',
           },
         });
-        await salvarMensagem(cliente.id, respostaFoto, 'resposta');
-        await enviarMensagem(telefone, respostaFoto);
+        await salvarMensagem(cliente.id, respostaFinalizado, 'resposta');
+        await enviarMensagem(telefone, respostaFinalizado);
         return res.sendStatus(200);
       }
+
+      // Compatibilidade: AGUARDANDO_FOTO é tratado como conversa aberta.
 
       // ----------------------------
       // AGUARDANDO_DATA
@@ -515,17 +456,7 @@ app.post('/webhook', async (req, res) => {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         if (temIntencaoOrcamento(mensagem)) {
-          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
-          const respostaNovoOrcamento = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'pedir foto para novo orçamento',
-            dados: {
-              acao: 'pedir_foto',
-              motivo: 'novo_orcamento',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
+          const respostaNovoOrcamento = await processarMensagem(telefone, mensagem);
           await enviarMensagem(telefone, respostaNovoOrcamento);
           return res.sendStatus(200);
         }
@@ -548,23 +479,6 @@ app.post('/webhook', async (req, res) => {
         || estadoEfetivo === 'AUTO'
         || estadoEfetivo === 'LIVRE'
       ) {
-        if (temIntencaoOrcamento(mensagem) && !contemCancelamentoOrcamento(mensagem)) {
-          await salvarMensagem(cliente.id, mensagem, 'entrada');
-          await setEstado(cliente.id, 'AGUARDANDO_FOTO');
-          const respostaNovoOrcamento = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'pedir foto para novo orçamento',
-            dados: {
-              acao: 'pedir_foto',
-              motivo: 'novo_orcamento',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaNovoOrcamento, 'resposta');
-          await enviarMensagem(telefone, respostaNovoOrcamento);
-          return res.sendStatus(200);
-        }
-
         const respostaLivre = await processarMensagem(telefone, mensagem);
         await enviarMensagem(telefone, respostaLivre);
         return res.sendStatus(200);
@@ -621,15 +535,15 @@ app.post('/webhook', async (req, res) => {
         return res.status(200).json({ ok: true, manual: true });
       }
 
-      // Se estava finalizado e mandou foto, inicia novo ciclo
+      // Se estava finalizado e mandou foto, inicia novo ciclo em estado aberto
       if (atendimento?.estado === 'FINALIZADO') {
-        await setEstado(cliente.id, 'AGUARDANDO_FOTO');
+        await setEstado(cliente.id, ESTADO_EM_CONVERSA);
       }
 
       // Hardening: precisa base64 ou messageId
       if (!base64 && !messageId) {
         const respostaErro = await gerarRespostaAssistente({
-          estado: 'AGUARDANDO_FOTO',
+          estado: ESTADO_EM_CONVERSA,
           mensagemCliente: '[erro ao receber foto]',
           objetivo: 'pedir foto',
           dados: { motivo: 'midia_ausente' },
@@ -662,7 +576,7 @@ app.post('/webhook', async (req, res) => {
     } catch (err) {
       console.error('❌ Erro no fluxo de imagem:', err.message || err);
       const respostaErro = await gerarRespostaAssistente({
-        estado: 'AGUARDANDO_FOTO',
+        estado: ESTADO_EM_CONVERSA,
         mensagemCliente: '[erro ao processar foto]',
         objetivo: 'pedir foto',
         dados: { motivo: 'erro_processamento' },
