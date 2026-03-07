@@ -1,6 +1,18 @@
 import { gerarRespostaChat } from './openaiService.js';
 
 const FALLBACK_TEMPLATES = {
+  cumprimentar: [
+    'Oi! Tudo bem? Como posso te ajudar hoje?',
+    'Olá! 😊 Como posso te ajudar por aqui?',
+    'Boa! Me conta como posso ajudar.',
+    'Opa! Tudo certo? Me diz como posso te ajudar.',
+  ],
+  generico: [
+    'Entendi 😊 Como posso te ajudar exatamente?',
+    'Certo! Me explica rapidinho o que você precisa.',
+    'Beleza — me conta um pouco mais do seu caso.',
+    'Perfeito. O que aconteceu com o carro (ou qual é a sua dúvida)?',
+  ],
   pedir_foto: [
     'Para seguir, pode me mandar uma foto do dano? Assim consigo te ajudar melhor.',
     'Consegue enviar uma foto do amassado? Isso já agiliza o orçamento.',
@@ -109,9 +121,50 @@ function formatValorEstimado(valor) {
   return String(valor);
 }
 
-function gerarFallback({ estado, objetivo, dados } = {}) {
+function mensagemPareceCumprimento(mensagem = '') {
+  const texto = String(mensagem)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .trim();
+
+  if (!texto) return false;
+
+  const tokens = texto.split(/\s+/g);
+  const cumprimentos = new Set([
+    'oi',
+    'ola',
+    'olá',
+    'bom',
+    'boa',
+    'dia',
+    'tarde',
+    'noite',
+    'opa',
+    'eai',
+    'eaii',
+    'eae',
+    'oie',
+    'oiei',
+  ]);
+
+  // Considera cumprimento se a mensagem for apenas saudação.
+  return tokens.every((t) => cumprimentos.has(t));
+}
+
+function gerarFallback({ estado, objetivo, dados, mensagemCliente } = {}) {
   const objetivoNormalizado = (objetivo || '').toLowerCase();
   const valorEstimado = formatValorEstimado(dados?.valor_estimado);
+
+  // ✅ IMPORTANTE: fallback deve ser neutro.
+  // Nunca pedir foto "por padrão" — somente quando fizer sentido.
+
+  if (
+    mensagemPareceCumprimento(mensagemCliente) ||
+    objetivoNormalizado.includes('cumpriment') ||
+    objetivoNormalizado.includes('sauda')
+  ) {
+    return pickRandomTemplate(FALLBACK_TEMPLATES.cumprimentar);
+  }
 
   if (objetivoNormalizado.includes('pedir foto') || estado === 'AGUARDANDO_FOTO') {
     return renderTemplate(pickRandomTemplate(FALLBACK_TEMPLATES.pedir_foto), dados);
@@ -163,7 +216,7 @@ function gerarFallback({ estado, objetivo, dados } = {}) {
     return pickRandomTemplate(FALLBACK_TEMPLATES.avaliacao_humana);
   }
 
-  return pickRandomTemplate(FALLBACK_TEMPLATES.pedir_foto);
+  return pickRandomTemplate(FALLBACK_TEMPLATES.generico);
 }
 
 function buildSystemPrompt() {
@@ -190,6 +243,7 @@ export async function gerarRespostaAssistente({
     estado,
     objetivo,
     dados,
+    mensagemCliente,
   });
 
   const userPrompt = [
