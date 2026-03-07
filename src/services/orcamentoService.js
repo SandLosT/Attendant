@@ -94,3 +94,31 @@ export async function setStatus(orcamentoId, status, extras = {}) {
     .where({ id: orcamentoId })
     .update({ status, ...extras });
 }
+
+export async function orcamentoPareceValido(orcamentoId) {
+  if (!orcamentoId) {
+    return false;
+  }
+
+  const orcamento = await db('orcamentos')
+    .where({ id: orcamentoId })
+    .first();
+
+  if (!orcamento) {
+    return false;
+  }
+
+  const semMatchScore = orcamento.match_score === null || orcamento.match_score === undefined;
+  const detalhesBrutos = orcamento.detalhes;
+  const semDetalhes =
+    detalhesBrutos === null
+    || detalhesBrutos === undefined
+    || (typeof detalhesBrutos === 'string' && detalhesBrutos.trim() === '')
+    || (typeof detalhesBrutos === 'object' && Object.keys(detalhesBrutos).length === 0);
+
+  if (semMatchScore && semDetalhes) {
+    return false;
+  }
+
+  return true;
+}

@@ -15,13 +15,12 @@ import { saveBase64ToUploads } from './services/mediaService.js';
 
 import {
   getAtendimentoByClienteId,
-  getOrCreateAtendimento,
   isManualAtivo,
   setEstado,
   ESTADO_EM_CONVERSA,
 } from './services/atendimentoService.js';
 
-import { setPreferenciaData } from './services/orcamentoService.js';
+import { orcamentoPareceValido, setPreferenciaData } from './services/orcamentoService.js';
 
 import {
   extrairDataEPeriodo,
@@ -46,49 +45,6 @@ const HASH_DEDUPE_TTL_MS = 30000;
 const webhookDedupe = new Map();
 const webhookHashDedupe = new Map();
 
-const TERMOS_INTENCAO_ORCAMENTO = [
-  'orçamento',
-  'orcamento',
-  'amassado',
-  'batida',
-  'arrumar',
-  'martelinho',
-  'quanto custa',
-  'preço',
-  'preco',
-  'valor',
-  'cotação',
-  'cotacao',
-  'paralama',
-  'porta',
-  'capô',
-  'capo',
-  'carro',
-];
-
-const TERMOS_CUMPRIMENTO = [
-  'oi',
-  'ola',
-  'olá',
-  'olar',
-  'bom dia',
-  'boa tarde',
-  'boa noite',
-  'opa',
-  'e ai',
-  'e aí',
-];
-
-const TERMOS_CANCELAMENTO_ORCAMENTO = [
-  'nao quero',
-  'não quero',
-  'não precisa',
-  'nao precisa',
-  'deixa',
-  'sem orçamento',
-  'sem orcamento',
-];
-
 function normalizarTexto(texto = '') {
   return texto
     .toLowerCase()
@@ -97,33 +53,19 @@ function normalizarTexto(texto = '') {
     .trim();
 }
 
-function temIntencaoOrcamento(texto = '') {
-  const textoNormalizado = normalizarTexto(texto);
-  return TERMOS_INTENCAO_ORCAMENTO.some((termo) => textoNormalizado.includes(normalizarTexto(termo)));
-}
-
-function mensagemEhSoCumprimento(texto = '') {
-  const textoNormalizado = normalizarTexto(texto).replace(/[!?.;,]/g, '').trim();
-  if (!textoNormalizado) {
-    return false;
-  }
-  return TERMOS_CUMPRIMENTO.includes(textoNormalizado);
-}
-
-function contemCancelamentoOrcamento(texto = '') {
-  const textoNormalizado = normalizarTexto(texto);
-  return TERMOS_CANCELAMENTO_ORCAMENTO.some((termo) => textoNormalizado.includes(normalizarTexto(termo)));
-}
-
-function contemPedidoEnvioFoto(texto = '') {
+function mensagemPedeStatusAprovacao(texto = '') {
   const textoNormalizado = normalizarTexto(texto);
   return [
-    'posso mandar uma foto',
-    'posso mandar foto',
-    'posso enviar uma foto',
-    'posso enviar foto',
-    'enviar foto',
-    'mandar foto',
+    'status',
+    'aprov',
+    'responsavel',
+    'responsável',
+    'retorno',
+    'novidade',
+    'andamento',
+    'resposta',
+    'orçamento',
+    'orcamento',
   ].some((termo) => textoNormalizado.includes(termo));
 }
 
@@ -316,68 +258,17 @@ app.post('/webhook', async (req, res) => {
       if (
         atendimento
         && (estadoEfetivo === 'AGUARDANDO_APROVACAO_DONO' || estadoEfetivo === 'AGUARDANDO_DATA')
-        && !atendimento.orcamento_id_atual
       ) {
-        await setEstadoComLog(cliente.id, estadoEfetivo, 'ABERTO', 'auto_cura_sem_orcamento');
-        const respostaAutoCura = await processarMensagem(telefone, mensagem);
-        await enviarMensagem(telefone, respostaAutoCura);
-        return res.sendStatus(200);
-      }
-
-      if (!atendimento) {
-        if (temIntencaoOrcamento(mensagem) && !contemCancelamentoOrcamento(mensagem)) {
-          atendimento = await getOrCreateAtendimento(cliente.id);
-          const estadoAnterior = atendimento?.estado;
-          await setEstadoComLog(cliente.id, estadoAnterior, 'AGUARDANDO_FOTO', 'intencao_orcamento_texto');
-          const respostaFoto = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'solicitar foto do dano',
-            dados: {
-              acao: 'pedir_foto_dano',
-              orientacoes: 'pedir 1 foto do dano e a peça (porta, paralama ou capô), fazendo 1 pergunta por vez',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaFoto, 'resposta');
-          await enviarMensagem(telefone, respostaFoto);
+        const orcamentoValido = await orcamentoPareceValido(atendimento.orcamento_id_atual);
+        if (!orcamentoValido) {
+          await setEstadoComLog(cliente.id, estadoEfetivo, ESTADO_EM_CONVERSA, 'auto_cura_orcamento_invalido');
+          const respostaAutoCura = await processarMensagem(telefone, mensagem);
+          await enviarMensagem(telefone, respostaAutoCura);
           return res.sendStatus(200);
         }
-
-        const respostaInicial = await processarMensagem(telefone, mensagem);
-        await enviarMensagem(telefone, respostaInicial);
-        return res.sendStatus(200);
       }
 
-      if (
-        temIntencaoOrcamento(mensagem)
-        && !contemCancelamentoOrcamento(mensagem)
-        && !['AGUARDANDO_DATA', 'AGUARDANDO_FOTO', 'AGUARDANDO_APROVACAO_DONO'].includes(estadoEfetivo)
-      ) {
-        await salvarMensagem(cliente.id, mensagem, 'entrada');
-        await setEstadoComLog(cliente.id, estadoEfetivo, 'AGUARDANDO_FOTO', 'intencao_orcamento_texto');
-        const respostaFoto = await gerarRespostaAssistente({
-          estado: 'AGUARDANDO_FOTO',
-          mensagemCliente: mensagem,
-          objetivo: 'solicitar foto do dano',
-          dados: {
-            acao: 'pedir_foto_dano',
-            orientacoes: 'pedir 1 foto do dano e a peça (porta, paralama ou capô), fazendo 1 pergunta por vez',
-          },
-        });
-        await salvarMensagem(cliente.id, respostaFoto, 'resposta');
-        await enviarMensagem(telefone, respostaFoto);
-        return res.sendStatus(200);
-      }
-
-      // Atendimento finalizado: só volta ao fluxo de orçamento se cliente indicar novo orçamento
       if (estadoEfetivo === 'FINALIZADO') {
-        if (temIntencaoOrcamento(mensagem) && !contemCancelamentoOrcamento(mensagem)) {
-          await setEstadoComLog(cliente.id, estadoEfetivo, ESTADO_EM_CONVERSA, 'novo_orcamento_apos_finalizado');
-          const respostaNovoOrcamento = await processarMensagem(telefone, mensagem);
-          await enviarMensagem(telefone, respostaNovoOrcamento);
-          return res.sendStatus(200);
-        }
-
         await salvarMensagem(cliente.id, mensagem, 'entrada');
         const respostaFinalizado = await gerarRespostaAssistente({
           estado: 'FINALIZADO',
@@ -392,73 +283,11 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      if (estadoEfetivo === 'AGUARDANDO_FOTO') {
-        await salvarMensagem(cliente.id, mensagem, 'entrada');
-
-        if (contemCancelamentoOrcamento(mensagem)) {
-          await setEstadoComLog(cliente.id, estadoEfetivo, 'ABERTO', 'cancelamento_orcamento_em_aguardando_foto');
-          const respostaCancelamento = await gerarRespostaAssistente({
-            estado: 'ABERTO',
-            mensagemCliente: mensagem,
-            objetivo: 'cancelamento de orçamento',
-            dados: { acao: 'cancelar_orcamento' },
-          });
-          await salvarMensagem(cliente.id, respostaCancelamento, 'resposta');
-          await enviarMensagem(telefone, respostaCancelamento);
-          return res.sendStatus(200);
-        }
-
-        if (contemPedidoEnvioFoto(mensagem)) {
-          const respostaConfirmacaoFoto = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'confirmar envio de foto',
-            dados: {
-              acao: 'confirmar_envio_foto',
-              orientacoes: 'confirmar que pode enviar e pedir 1 foto do dano com a peça visível',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaConfirmacaoFoto, 'resposta');
-          await enviarMensagem(telefone, respostaConfirmacaoFoto);
-          return res.sendStatus(200);
-        }
-
-        if (temIntencaoOrcamento(mensagem)) {
-          const respostaReforcoFoto = await gerarRespostaAssistente({
-            estado: 'AGUARDANDO_FOTO',
-            mensagemCliente: mensagem,
-            objetivo: 'reforçar solicitação de foto',
-            dados: {
-              acao: 'pedir_foto_dano',
-              orientacoes: 'pedir novamente 1 foto do dano e a peça afetada, sem confirmar responsável',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaReforcoFoto, 'resposta');
-          await enviarMensagem(telefone, respostaReforcoFoto);
-          return res.sendStatus(200);
-        }
-      }
-
       // ----------------------------
       // AGUARDANDO_DATA
       // ----------------------------
       if (estadoEfetivo === 'AGUARDANDO_DATA') {
         await salvarMensagem(cliente.id, mensagem, 'entrada');
-
-        if (contemCancelamentoOrcamento(mensagem)) {
-          await setEstadoComLog(cliente.id, estadoEfetivo, ESTADO_EM_CONVERSA, 'cancelamento_orcamento_aguardando_data');
-          const respostaCancelamento = await gerarRespostaAssistente({
-            estado: ESTADO_EM_CONVERSA,
-            mensagemCliente: mensagem,
-            objetivo: 'cancelamento de orçamento',
-            dados: {
-              acao: 'cancelar_orcamento',
-            },
-          });
-          await salvarMensagem(cliente.id, respostaCancelamento, 'resposta');
-          await enviarMensagem(telefone, respostaCancelamento);
-          return res.sendStatus(200);
-        }
 
         const { data, periodo } = extrairDataEPeriodo(mensagem);
         const periodoPreferido = normalizarPeriodo(periodo);
@@ -584,14 +413,13 @@ app.post('/webhook', async (req, res) => {
       }
 
       if (estadoEfetivo === 'AGUARDANDO_APROVACAO_DONO') {
-        if (!atendimento.orcamento_id_atual) {
-          await setEstadoComLog(cliente.id, estadoEfetivo, 'ABERTO', 'auto_cura_aprovacao_sem_orcamento');
-          const respostaAutoCura = await processarMensagem(telefone, mensagem);
-          await enviarMensagem(telefone, respostaAutoCura);
+        await salvarMensagem(cliente.id, mensagem, 'entrada');
+
+        if (!mensagemPedeStatusAprovacao(mensagem)) {
+          const respostaNormal = await processarMensagem(telefone, mensagem);
+          await enviarMensagem(telefone, respostaNormal);
           return res.sendStatus(200);
         }
-
-        await salvarMensagem(cliente.id, mensagem, 'entrada');
 
         const respostaStatus = await gerarRespostaAssistente({
           estado: 'AGUARDANDO_APROVACAO_DONO',
