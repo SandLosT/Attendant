@@ -25,7 +25,7 @@ import {
   ESTADO_EM_CONVERSA,
 } from './services/atendimentoService.js';
 
-import { setPreferenciaData } from './services/orcamentoService.js';
+import { orcamentoPareceValido, setPreferenciaData } from './services/orcamentoService.js';
 
 import {
   extrairDataEPeriodo,
@@ -148,6 +148,9 @@ function mensagemPedeStatusOuRetorno(texto = '') {
     'demora',
     'aprov',
     'confirm',
+    'responsavel',
+    'responsável',
+    'novidade',
   ];
   return termos.some((termo) => t.includes(termo));
 }
@@ -320,6 +323,7 @@ app.post('/webhook', async (req, res) => {
     try {
       const cliente = await obterOuCriarCliente(telefone);
       let atendimento = await getAtendimentoByClienteId(cliente.id);
+
       const estadoAtual = atendimento?.estado ?? null;
       const modoManualAtivo = isManualAtivo(atendimento);
 
@@ -363,16 +367,15 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Auto-cura: não pode existir AGUARDANDO_* sem orçamento atual
-      if (
-        atendimento &&
-        (estadoAtual === 'AGUARDANDO_APROVACAO_DONO' || estadoAtual === 'AGUARDANDO_DATA') &&
-        !atendimento.orcamento_id_atual
-      ) {
-        await setEstadoComLog(cliente.id, estadoAtual, ESTADO_EM_CONVERSA, 'auto_cura_sem_orcamento');
-        const respostaAutoCura = await processarMensagem(telefone, mensagem);
-        await enviarMensagem(telefone, respostaAutoCura);
-        return res.sendStatus(200);
+      // Auto-cura: não pode ficar preso em AGUARDANDO_* se o orçamento atual não estiver válido
+      if (atendimento && (estadoAtual === 'AGUARDANDO_APROVACAO_DONO' || estadoAtual === 'AGUARDANDO_DATA')) {
+        const ok = await orcamentoPareceValido(atendimento.orcamento_id_atual);
+        if (!ok) {
+          await setEstadoComLog(cliente.id, estadoAtual, ESTADO_EM_CONVERSA, 'auto_cura_orcamento_invalido');
+          const respostaAutoCura = await processarMensagem(telefone, mensagem);
+          await enviarMensagem(telefone, respostaAutoCura);
+          return res.sendStatus(200);
+        }
       }
 
       // Se ainda não existe atendimento:
@@ -445,7 +448,6 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
-        // assunto geral
         const respostaFinalizado = await gerarRespostaAssistente({
           estado: 'FINALIZADO',
           mensagemCliente: mensagem,
@@ -483,7 +485,6 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
-        // se ele está falando de orçamento ainda, reforça foto
         if (temIntencaoOrcamento(mensagem)) {
           const respostaReforcoFoto = await gerarRespostaAssistente({
             estado: 'AGUARDANDO_FOTO',
@@ -501,7 +502,7 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
         }
 
-        // se o cliente falar de outro assunto, responde normal (IA)
+        // se o cliente falar de outro assunto, responde normal
         const respostaLivre = await processarMensagem(telefone, mensagem);
         await enviarMensagem(telefone, respostaLivre);
         return res.sendStatus(200);
@@ -626,10 +627,7 @@ app.post('/webhook', async (req, res) => {
           estado: 'AGUARDANDO_DATA',
           mensagemCliente: mensagem,
           objetivo: 'confirmar pre-reserva',
-          dados: {
-            dataBr: formatarDataBr(data),
-            periodoTxt,
-          },
+          dados: { dataBr: formatarDataBr(data), periodoTxt },
           fallback: `Perfeito — já pré-reservei ${formatarDataBr(data)} (${periodoTxt}) ✅. Agora estou confirmando com o responsável e já te retorno.`,
         });
 
@@ -642,7 +640,6 @@ app.post('/webhook', async (req, res) => {
       // AGUARDANDO_APROVACAO_DONO
       // ----------------------------
       if (estadoAtual === 'AGUARDANDO_APROVACAO_DONO') {
-        // auto-cura se faltar orçamento
         if (!atendimento.orcamento_id_atual) {
           await setEstadoComLog(cliente.id, estadoAtual, ESTADO_EM_CONVERSA, 'auto_cura_aprovacao_sem_orcamento');
           const respostaAutoCura = await processarMensagem(telefone, mensagem);
@@ -654,7 +651,6 @@ app.post('/webhook', async (req, res) => {
 
         const ehSobreStatus = mensagemPedeStatusOuRetorno(mensagem) || temIntencaoOrcamento(mensagem);
 
-        // Se for outro assunto, responde conversa normal e não insiste
         if (!ehSobreStatus) {
           const respostaConversacional = await gerarRespostaAssistente({
             estado: ESTADO_EM_CONVERSA,

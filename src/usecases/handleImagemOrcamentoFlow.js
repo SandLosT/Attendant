@@ -63,9 +63,8 @@ export async function handleImagemOrcamentoFlow({
 
   const statusFaz = normalizarStatusFaz(estimate?.best_match_status_faz);
   const passouThreshold = estimate?.threshold_passed === true;
-  const atendimentoEstado = passouThreshold && statusFaz
-    ? 'AGUARDANDO_DATA'
-    : 'AGUARDANDO_APROVACAO_DONO';
+  const aprovado = passouThreshold && statusFaz;
+  const atendimentoEstado = aprovado ? 'AGUARDANDO_DATA' : 'AGUARDANDO_APROVACAO_DONO';
 
   await setEstadoEOrcamento(cliente.id, atendimentoEstado, orcamentoId);
 
@@ -79,10 +78,11 @@ export async function handleImagemOrcamentoFlow({
   const resposta = await gerarRespostaAssistente({
     estado: atendimentoEstado,
     mensagemCliente: '[imagem]',
-    objetivo: passouThreshold && statusFaz
+    objetivo: aprovado
       ? 'informar orçamento estimado e pedir data'
       : 'explicar que precisa avaliação humana / encaminhar pro responsável',
     dados: {
+      acao: aprovado ? 'pedir_data' : 'aguardando_aprovacao',
       valor_estimado: valorFormatado,
       match_score: estimate?.best_match_score,
       peca: estimate?.best_match_peca || estimate?.peca,
