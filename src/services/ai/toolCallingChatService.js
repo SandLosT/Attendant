@@ -36,11 +36,16 @@ export async function runToolCallingChat({
   ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-    const completion = await createChatCompletion({
-      messages,
-      tools,
-      tool_choice: 'auto',
-    });
+    let completion;
+    try {
+      completion = await createChatCompletion({
+        messages,
+        tools,
+        tool_choice: 'auto',
+      });
+    } catch {
+      return { ok: false, reason: 'MODEL_UNAVAILABLE' };
+    }
 
     const message = completion?.choices?.[0]?.message;
     if (!message) break;
@@ -59,6 +64,7 @@ export async function runToolCallingChat({
       tool_calls: message.tool_calls,
     });
 
+    let hadToolError = false;
     for (const toolCall of message.tool_calls) {
       const toolName = toolCall.function?.name;
       const args = parseArgs(toolCall.function?.arguments);
@@ -67,6 +73,7 @@ export async function runToolCallingChat({
       try {
         toolResult = await mcpClient.callTool(toolName, args);
       } catch (error) {
+        hadToolError = true;
         toolResult = {
           ok: false,
           error: error.message,
@@ -79,6 +86,10 @@ export async function runToolCallingChat({
         tool_call_id: toolCall.id,
         content: JSON.stringify(toolResult),
       });
+    }
+
+    if (hadToolError && round >= 1) {
+      return { ok: false, reason: 'TOOL_ERROR' };
     }
   }
 

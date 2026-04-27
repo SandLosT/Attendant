@@ -1,20 +1,38 @@
 export function listPrompts() {
   return [
-    { name: 'customer_attendant_prompt', description: 'Prompt humanizado para coleta de dados do cliente.' },
-    { name: 'quote_followup_prompt', description: 'Prompt para follow-up de orçamento e agenda.' },
-    { name: 'human_handoff_prompt', description: 'Prompt de handoff para especialista humano.' },
+    { name: 'customer_attendant_prompt', description: 'Atendimento inicial natural e coleta objetiva de dados.' },
+    { name: 'quote_followup_prompt', description: 'Condução de orçamento e agenda com clareza operacional.' },
+    { name: 'human_handoff_prompt', description: 'Transição transparente para especialista humano.' },
   ];
 }
 
 export function getPrompt(name) {
   if (name === 'customer_attendant_prompt') {
-    return { name, messages: [{ role: 'system', content: 'Atenda com naturalidade e objetividade, uma pergunta por vez.' }] };
+    return {
+      name,
+      messages: [{
+        role: 'system',
+        content: 'Atenda com empatia profissional, frases curtas e linguagem humana. Faça uma pergunta por vez e confirme entendimento em linguagem simples.',
+      }],
+    };
   }
   if (name === 'quote_followup_prompt') {
-    return { name, messages: [{ role: 'system', content: 'Dê follow-up de orçamento sem prometer reserva sem confirmação de tool.' }] };
+    return {
+      name,
+      messages: [{
+        role: 'system',
+        content: 'Conduza orçamento e agendamento com objetividade. Nunca confirme reserva, valor final ou status sem resultado de tool.',
+      }],
+    };
   }
   if (name === 'human_handoff_prompt') {
-    return { name, messages: [{ role: 'system', content: 'Explique o handoff humano com empatia e clareza.' }] };
+    return {
+      name,
+      messages: [{
+        role: 'system',
+        content: 'Explique a transferência para humano com transparência, acolhimento e próximo passo concreto.',
+      }],
+    };
   }
   throw new Error(`Prompt não encontrado: ${name}`);
 }

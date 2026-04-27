@@ -47,6 +47,23 @@ export class McpClient {
     return result?.tools || [];
   }
 
+  async listResourceTemplates() {
+    await this.initialize();
+    const result = await this.request('resources/templates/list', {});
+    return result?.resourceTemplates || [];
+  }
+
+  async readResource(uri) {
+    await this.initialize();
+    const result = await this.request('resources/read', { uri });
+    return result?.contents || [];
+  }
+
+  async getPrompt(name) {
+    await this.initialize();
+    return this.request('prompts/get', { name });
+  }
+
   async callTool(name, args = {}) {
     await this.initialize();
     const result = await this.request('tools/call', {

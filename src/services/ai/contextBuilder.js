@@ -16,6 +16,13 @@ function stageObjective(state) {
   return 'entender o problema e avançar para orçamento';
 }
 
+function stageStyle(state) {
+  if (state === ATTENDANCE_STATE.HUMAN_HANDOFF) return 'acolhedor e transparente';
+  if (state === ATTENDANCE_STATE.WAITING_SCHEDULE) return 'objetivo, confirmando data e período';
+  if (state === ATTENDANCE_STATE.WAITING_IMAGE) return 'didático e gentil, pedindo foto nítida';
+  return 'profissional, próximo e direto';
+}
+
 export function buildConversationContext({ context, customerMessage }) {
   const customer = context?.customer || {};
   const attendance = context?.attendance || {};
@@ -41,6 +48,7 @@ export function buildConversationContext({ context, customerMessage }) {
     `Dados coletados: ${collected.length ? collected.join(', ') : 'nenhum relevante'}`,
     `Dados faltantes: ${missing.length ? missing.join(', ') : 'nenhum'}`,
     `Objetivo desta etapa: ${stageObjective(attendance.estado)}`,
+    `Estilo recomendado: ${stageStyle(attendance.estado)}. Responda em até 3 frases curtas.`,
     `Histórico recente:\n${compactHistory(context?.messages) || 'Sem histórico relevante.'}`,
     `Mensagem atual do cliente: ${customerMessage}`,
   ].join('\n');
