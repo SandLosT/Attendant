@@ -10,12 +10,14 @@ import { saveBase64ToUploads } from '../../../src/services/mediaService.js';
 import { getImageEmbedding, estimateQuoteByEmbedding } from '../../../src/integrations/embed/embedService.js';
 import { sendWhatsAppMessage } from '../../../src/integrations/messaging/wppMessagingService.js';
 import { normalizePeriod } from '../../../src/domain/services/scheduleDomainService.js';
+import { getStoreInfo } from '../../../src/repositories/storeInfoRepository.js';
 
 const required = (value, field) => {
   if (value === undefined || value === null || value === '') throw new Error(`Campo obrigatório ausente: ${field}`);
 };
 
 const asText = (value) => (typeof value === 'string' ? value : String(value ?? ''));
+const SIGNAL_PREFIX = '[ATTENDANCE_SIGNAL] ';
 
 async function ensureSlot(data, periodo, capacidade = Number(process.env.AGENDA_CAPACIDADE_PADRAO || 3)) {
   const existing = await findSlot(data, periodo);
@@ -36,9 +38,45 @@ async function getActiveQuoteForCustomer(customerId, attendance = null) {
   return null;
 }
 
+function parseOperationalSignals(messages = []) {
+  return messages
+    .filter((message) => message.tipo === 'resposta' && typeof message.mensagem === 'string' && message.mensagem.startsWith(SIGNAL_PREFIX))
+    .map((message) => {
+      try {
+        return JSON.parse(message.mensagem.slice(SIGNAL_PREFIX.length));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .slice(-6);
+}
+
+async function persistSignal({ customerId, payload }) {
+  await saveMessage({
+    customerId: Number(customerId),
+    direction: 'resposta',
+    content: `${SIGNAL_PREFIX}${JSON.stringify(payload)}`,
+  });
+}
+
 export function getToolDefinitions() {
   return [
-    { name: 'get_customer_context', description: 'Carrega cliente, atendimento, orçamento em aberto e histórico recente.', inputSchema: { type: 'object', properties: { phone: { type: 'string' } }, required: ['phone'] }, outputSchema: { type: 'object' }, handler: async ({ phone }) => { required(phone, 'phone'); const customer = await getOrCreateCustomer(phone); const attendance = await getOrCreateAttendance(customer.id); const activeQuote = await getActiveQuoteForCustomer(customer.id, attendance); const messages = (await listRecentMessages(customer.id, 12)).reverse(); return { customer, attendance, activeQuote, messages }; } },
+    {
+      name: 'get_customer_context',
+      description: 'Carrega cliente, atendimento, orçamento em aberto e histórico recente.',
+      inputSchema: { type: 'object', properties: { phone: { type: 'string' } }, required: ['phone'] },
+      outputSchema: { type: 'object' },
+      handler: async ({ phone }) => {
+        required(phone, 'phone');
+        const customer = await getOrCreateCustomer(phone);
+        const attendance = await getOrCreateAttendance(customer.id);
+        const activeQuote = await getActiveQuoteForCustomer(customer.id, attendance);
+        const messages = (await listRecentMessages(customer.id, 20)).reverse();
+        const operationalSignals = parseOperationalSignals(messages);
+        return { customer, attendance, activeQuote, messages, operationalSignals };
+      },
+    },
     { name: 'get_current_attendance', description: 'Retorna (ou cria) atendimento atual do cliente.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' } }, required: ['customerId'] }, outputSchema: { type: 'object' }, handler: async ({ customerId }) => getOrCreateAttendance(Number(customerId)) },
     { name: 'save_incoming_message', description: 'Persiste mensagem recebida do cliente.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' }, message: { type: 'string' } }, required: ['customerId', 'message'] }, outputSchema: { type: 'object' }, handler: async ({ customerId, message }) => { await saveMessage({ customerId: Number(customerId), direction: 'entrada', content: asText(message) }); return { ok: true }; } },
     { name: 'save_outgoing_message', description: 'Persiste mensagem enviada ao cliente.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' }, message: { type: 'string' } }, required: ['customerId', 'message'] }, outputSchema: { type: 'object' }, handler: async ({ customerId, message }) => { await saveMessage({ customerId: Number(customerId), direction: 'resposta', content: asText(message) }); return { ok: true }; } },
@@ -51,7 +89,65 @@ export function getToolDefinitions() {
     { name: 'release_schedule_slot', description: 'Libera slot reservado.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' }, date: { type: 'string' }, period: { type: 'string' } }, required: ['customerId', 'date', 'period'] }, outputSchema: { type: 'object' }, handler: async ({ customerId, date, period }) => { const normalizedPeriod = normalizePeriod(period); const slot = await findSlot(date, normalizedPeriod); if (!slot || slot.reservados <= 0) return { ok: false, reason: 'NO_RESERVATION' }; const updatedSlot = await updateSlot(slot.id, { reservados: slot.reservados - 1 }); const attendance = await getOrCreateAttendance(Number(customerId)); const quote = await getActiveQuoteForCustomer(Number(customerId), attendance); if (quote && quote.slot_data === date && quote.slot_periodo === normalizedPeriod) { await updateQuote(quote.id, { slot_data: null, slot_periodo: null }); await updateAttendance(Number(customerId), { estado: ATTENDANCE_STATE.WAITING_SCHEDULE }); } return { ok: true, slot: updatedSlot }; } },
     { name: 'escalate_to_human', description: 'Escala atendimento para humano (modo MANUAL + estado HUMAN_HANDOFF).', inputSchema: { type: 'object', properties: { customerId: { type: 'number' }, reason: { type: 'string' } }, required: ['customerId'] }, outputSchema: { type: 'object' }, handler: async ({ customerId, reason }) => updateAttendance(Number(customerId), { estado: ATTENDANCE_STATE.HUMAN_HANDOFF, modo: ATTENDANCE_MODE.MANUAL, manual_motivo: reason || null }) },
     { name: 'resume_automatic_flow', description: 'Retoma atendimento automático preservando contexto.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' } }, required: ['customerId'] }, outputSchema: { type: 'object' }, handler: async ({ customerId }) => { const attendance = await getOrCreateAttendance(Number(customerId)); let nextState = attendance.estado; if (nextState === ATTENDANCE_STATE.HUMAN_HANDOFF) nextState = attendance.orcamento_id_atual ? ATTENDANCE_STATE.WAITING_SCHEDULE : ATTENDANCE_STATE.OPEN; return updateAttendance(Number(customerId), { modo: ATTENDANCE_MODE.AUTO, estado: nextState, manual_motivo: null }); } },
+    {
+      name: 'register_attendance_constraint',
+      description: 'Registra constraints/pêndencias reais do fluxo e pode atualizar estado operacional.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          customerId: { type: 'number' },
+          kind: { type: 'string' },
+          detail: { type: 'string' },
+          blockedStage: { type: 'string' },
+          pendingItems: { type: 'array', items: { type: 'string' } },
+          alternatives: { type: 'array', items: { type: 'string' } },
+          setState: { type: 'string' },
+          setMode: { type: 'string' },
+        },
+        required: ['customerId', 'kind'],
+      },
+      outputSchema: { type: 'object' },
+      handler: async ({ customerId, kind, detail = null, blockedStage = null, pendingItems = [], alternatives = [], setState = null, setMode = null }) => {
+        const normalizedCustomerId = Number(customerId);
+        const event = {
+          kind,
+          detail,
+          blockedStage,
+          pendingItems,
+          alternatives,
+          createdAt: new Date().toISOString(),
+        };
+
+        await persistSignal({ customerId: normalizedCustomerId, payload: event });
+
+        const patch = {};
+        if (setState) {
+          assertState(setState);
+          patch.estado = setState;
+        }
+        if (setMode) {
+          assertMode(setMode);
+          patch.modo = setMode;
+        }
+        const attendance = Object.keys(patch).length
+          ? await updateAttendance(normalizedCustomerId, patch)
+          : await getOrCreateAttendance(normalizedCustomerId);
+
+        return { ok: true, event, attendance };
+      },
+    },
     { name: 'close_attendance', description: 'Fecha atendimento e encerra orçamento atual quando existir.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' } }, required: ['customerId'] }, outputSchema: { type: 'object' }, handler: async ({ customerId }) => { const attendance = await getOrCreateAttendance(Number(customerId)); if (attendance.orcamento_id_atual) await updateQuote(attendance.orcamento_id_atual, { status: QUOTE_STATUS.CLOSED, fechado_em: new Date() }); return updateAttendance(Number(customerId), { estado: ATTENDANCE_STATE.CLOSED }); } },
     { name: 'send_customer_message', description: 'Envia mensagem ao cliente pelo provedor WhatsApp.', inputSchema: { type: 'object', properties: { phone: { type: 'string' }, message: { type: 'string' } }, required: ['phone', 'message'] }, outputSchema: { type: 'object' }, handler: async ({ phone, message }) => { await sendWhatsAppMessage(phone, message); return { ok: true }; } },
+    {
+      name: 'get_shop_info',
+      description: 'Retorna informações de contato e endereço da loja.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      outputSchema: { type: 'object' },
+      handler: async () => {
+        const shop = await getStoreInfo();
+        if (!shop) return { ok: false, reason: 'SHOP_INFO_NOT_FOUND' };
+        return { ok: true, ...shop };
+      },
+    },
   ];
 }
