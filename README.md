@@ -1,95 +1,158 @@
-# Attendant (MCP real + MySQL only)
+# Attendant (MySQL + MCP Server separado)
 
-Implementação com **backend principal** e **MCP server separado**, conectados por JSON-RPC.
+Projeto com **backend principal (Express)**, **MCP server dedicado (JSON-RPC)**, **PWA do owner** e **serviço de embeddings** para análise de imagem.
 
-## Arquitetura
+## 1) Arquitetura operacional
 
-- **Backend principal** (`src/*`): Express, webhook, owner APIs, PWA, orquestração, integração LLM e cliente MCP.
-- **MCP server** (`mcp-server/src/*`): tools formais (com schemas), resources, prompts e handlers conectados aos services/repositories.
-- **AI layer** (`src/services/ai/*`): context builder + loop real de tool calling (`tool_choice: auto`).
+- **Backend API**: `src/app.js` (porta padrão `3001`)
+  - Webhook WhatsApp
+  - Rotas owner e agenda
+  - Orquestração conversacional + tool calling via MCP
+- **MCP Server**: `mcp-server/src/server.js` (porta padrão `3100`)
+  - `initialize`, `tools/list`, `tools/call`
+  - `resources/list`, `resources/templates/list`, `resources/read`
+  - `prompts/list`, `prompts/get`
+- **Embedding service**: `embed_faiss_service.py` (porta padrão `8001`)
+- **PWA owner**: `src/pwa-owner` (build servido em `/owner/pwa` pelo backend)
 
-## Executar
+## 2) Pré-requisitos
+
+- Node.js 20+
+- Python 3.10+
+- MySQL 8+
+- NPM
+
+## 3) Variáveis de ambiente
+
+Copie o exemplo:
+
+```bash
+cp .env.example .env
+```
+
+Campos principais (ajuste conforme ambiente):
+
+- **Banco MySQL**
+  - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+- **Backend**
+  - `PORT` (ex.: `3001`)
+  - `OWNER_AUTH_TOKEN` (obrigatório para rotas owner)
+  - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TEMPERATURE`
+- **MCP**
+  - `MCP_PORT` (ex.: `3100`)
+  - `MCP_SERVER_URL` (no backend: `http://localhost:3100/jsonrpc`)
+  - `MCP_TIMEOUT_MS`
+- **Embeddings**
+  - `EMBED_SERVICE_URL` (ex.: `http://localhost:8001`)
+
+## 4) Instalação
 
 ```bash
 npm install
+npm --prefix mcp-server install
+python3 -m pip install -r requirements-embed.txt
+```
+
+## 5) Ordem correta de subida
+
+### Passo 1 — MySQL
+Garanta o banco ativo e acessível pelas variáveis de ambiente.
+
+### Passo 2 — Migração + seed
+```bash
 npm run migrate
 npm run seed
-npm run pwa:build
+```
+
+### Passo 3 — Embedding service
+```bash
+python3 embed_faiss_service.py
+```
+
+### Passo 4 — MCP server
+```bash
 npm run mcp:start
+```
+
+### Passo 5 — PWA build
+```bash
+npm run pwa:build
+```
+
+### Passo 6 — Backend
+```bash
 npm run start
 ```
 
-### Healthchecks
+## 6) Validação rápida
 
+### Healthchecks
 ```bash
-curl http://localhost:3100/health
 curl http://localhost:3001/health
+curl http://localhost:3100/health
 ```
 
-## Endpoints principais
+### Initialize MCP
+```bash
+curl -X POST http://localhost:3100/jsonrpc \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+```
 
-- `POST /webhook` entrada do WhatsApp
-- `GET /owner/pwa`
-- `GET /owner/orcamentos`
-- `GET /owner/agenda`
+### Listar tools MCP
+```bash
+curl -X POST http://localhost:3100/jsonrpc \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
 
-## MCP server
+### Ler resource MCP
+```bash
+curl -X POST http://localhost:3100/jsonrpc \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"schedule://availability?date=2026-04-30&period=MANHA"}}'
+```
 
-Endpoint JSON-RPC:
+## 7) Testes automatizados mínimos
 
-- `POST http://localhost:3100/jsonrpc`
+```bash
+npm test
+```
 
-Métodos suportados:
+Cobertura mínima atual:
+- healthcheck backend
+- initialize/tools/list/tools/call/resources/read do MCP
+- webhook ignorando `fromMe`
+- confirmação de período quando cliente envia data sem período
+- owner flow básico (aprovar/recusar)
+- retorno MANUAL → AUTO preservando contexto
 
-- `initialize`
-- `tools/list`
-- `tools/call`
-- `resources/list`
-- `resources/read`
-- `prompts/list`
-- `prompts/get`
+## 8) Operação do owner (PWA)
 
-### Tools obrigatórias implementadas
+- URL: `http://localhost:3001/owner/pwa`
+- Autenticação: bearer token do owner (`OWNER_AUTH_TOKEN`)
+- Fluxos principais:
+  - aprovação/recusa de orçamento
+  - takeover/interferência manual
+  - devolução para automático
+  - fechamento manual
+  - bloqueio/desbloqueio de agenda
 
-- `get_customer_context`
-- `get_current_attendance`
-- `save_incoming_message`
-- `save_outgoing_message`
-- `set_attendance_state`
-- `set_attendance_mode`
-- `analyze_damage_image`
-- `create_quote_from_analysis`
-- `update_quote`
-- `reserve_schedule_slot`
-- `release_schedule_slot`
-- `escalate_to_human`
-- `resume_automatic_flow`
-- `close_attendance`
-- `send_customer_message`
+## 9) Troubleshooting rápido
 
-## Tool calling real (LLM)
+- **401 em rotas owner**
+  - conferir `OWNER_AUTH_TOKEN` no backend
+  - limpar token salvo no navegador e logar novamente
+- **Timeout no MCP client**
+  - validar `MCP_SERVER_URL`
+  - confirmar MCP server ativo em `MCP_PORT`
+- **Falha em análise de imagem**
+  - confirmar embedding service ativo (`EMBED_SERVICE_URL`)
+- **Sem resposta do modelo**
+  - validar `OPENAI_API_KEY`
+  - checar logs de fallback no backend
 
-Fluxo no backend:
+## 10) Limitações conhecidas
 
-1. carrega contexto via MCP;
-2. envia contexto + tools ao modelo;
-3. modelo decide tools (`tool_choice: auto`);
-4. backend executa tools via MCP client;
-5. resultado retorna ao modelo;
-6. modelo produz resposta final.
-
-## Variáveis de ambiente
-
-Veja `.env.example`.
-
-Novas/alteradas:
-
-- `MCP_PORT` (porta do processo MCP)
-- `MCP_SERVER_URL` (URL JSON-RPC usada pelo backend)
-- `MCP_TIMEOUT_MS` (timeout do cliente MCP)
-
-## Observações
-
-- Base continua **MySQL-only**.
-- `/owner/pwa` segue servido pelo backend.
-- Regras duras de negócio continuam no backend (ex.: modo MANUAL não responde automaticamente).
+- `resources/list` retorna vazio por padrão (uso principal é via `resources/templates/list` + `resources/read`).
+- Testes automatizados de reserva com persistência real em MySQL ainda podem exigir suite de integração dedicada com banco de teste.

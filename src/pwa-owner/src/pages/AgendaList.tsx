@@ -62,26 +62,13 @@ const AgendaList = () => {
     }, {});
   }, [slots]);
 
-  const handleGerar = async () => {
-    setActionLoading(true);
-    try {
-      await apiClient.post("/owner/agenda/gerar", { dias: 30 });
-      setToast({ message: "Agenda gerada com sucesso." });
-      await fetchSlots();
-    } catch (error) {
-      setToast({ message: "Erro ao gerar agenda.", variant: "error" });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   const handleToggleBloqueio = async (slot: Slot) => {
     setActionLoading(true);
     try {
-      const response = await apiClient.post("/owner/agenda/bloquear", {
+      const endpoint = slot.bloqueado ? "/owner/agenda/desbloquear" : "/owner/agenda/bloquear";
+      const response = await apiClient.post(endpoint, {
         data: slot.data,
         periodo: slot.periodo,
-        bloqueado: !slot.bloqueado,
       });
       const updatedSlot = response.data?.slot;
       if (updatedSlot) {
@@ -118,14 +105,6 @@ const AgendaList = () => {
             disabled={loading}
           >
             Atualizar
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={handleGerar}
-            disabled={actionLoading}
-          >
-            {actionLoading ? "Processando..." : "Gerar 30 dias"}
           </button>
         </div>
       </div>

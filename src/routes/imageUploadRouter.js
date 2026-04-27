@@ -1,11 +1,11 @@
 import express from 'express';
 import multer from 'multer';
-import { createMcpTools } from '../mcp/tools/registry.js';
 import { ConversationOrchestrator } from '../application/orchestration/conversationOrchestrator.js';
+import { getMcpClient } from '../integrations/mcp/mcpClient.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
-const orchestrator = new ConversationOrchestrator({ tools: createMcpTools() });
+const orchestrator = new ConversationOrchestrator({ mcpClient: getMcpClient() });
 
 router.post('/:telefone', upload.single('imagem'), async (req, res) => {
   const { telefone } = req.params;
