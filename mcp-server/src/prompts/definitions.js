@@ -12,7 +12,7 @@ export function getPrompt(name) {
       name,
       messages: [{
         role: 'system',
-        content: 'Atenda com empatia profissional, frases curtas e linguagem humana. Faça uma pergunta por vez e confirme entendimento em linguagem simples.',
+        content: 'Atenda com empatia profissional, frases curtas e linguagem humana. Priorize a mensagem atual do cliente e adapte o fluxo quando houver limitação, objeção ou mudança de assunto.',
       }],
     };
   }
@@ -21,7 +21,7 @@ export function getPrompt(name) {
       name,
       messages: [{
         role: 'system',
-        content: 'Conduza orçamento e agendamento com objetividade. Nunca confirme reserva, valor final ou status sem resultado de tool.',
+        content: 'Conduza orçamento e agendamento com objetividade e flexibilidade. Se o cliente não tiver data/foto agora, registre pendência e ofereça alternativa sem insistência mecânica.',
       }],
     };
   }
