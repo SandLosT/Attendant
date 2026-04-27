@@ -16,7 +16,7 @@ type OrcamentoResumo = {
 
 const OrcamentosList = () => {
   const [orcamentos, setOrcamentos] = useState<OrcamentoResumo[]>([]);
-  const [status, setStatus] = useState<string>("AGUARDANDO_APROVACAO_DONO");
+  const [status, setStatus] = useState<string>("NEEDS_HUMAN");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{
     message: string;
@@ -29,12 +29,12 @@ const OrcamentosList = () => {
 
     apiClient
       .get("/owner/orcamentos", {
-        params: { status: "AGUARDANDO_APROVACAO_DONO" },
+        params: { status: "NEEDS_HUMAN" },
       })
       .then((response) => {
         if (!isMounted) return;
         setOrcamentos(response.data?.orcamentos ?? []);
-        setStatus(response.data?.status ?? "AGUARDANDO_APROVACAO_DONO");
+        setStatus(response.data?.status ?? "NEEDS_HUMAN");
       })
       .catch(() => {
         if (!isMounted) return;

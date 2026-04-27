@@ -1,10 +1,7 @@
 import path from 'path';
-import * as dotenv from 'dotenv';
-
-dotenv.config();
+import 'dotenv/config';
 
 const {
-  DB_CLIENT = 'mysql2',
   DB_HOST = '127.0.0.1',
   DB_PORT = '3306',
   DB_USER = '',
@@ -14,7 +11,7 @@ const {
 
 export default {
   development: {
-    client: DB_CLIENT,
+    client: 'mysql2',
     connection: {
       host: DB_HOST,
       port: Number(DB_PORT),
@@ -22,11 +19,7 @@ export default {
       password: DB_PASSWORD,
       database: DB_NAME,
     },
-    migrations: {
-      directory: path.resolve('src/database/migrations'),
-    },
-    seeds: {
-      directory: path.resolve('src/database/seeds'),
-    },
-  }
+    migrations: { directory: path.resolve('src/database/migrations') },
+    seeds: { directory: path.resolve('src/database/seeds') },
+  },
 };

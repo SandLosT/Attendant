@@ -1,99 +1,77 @@
-# Attendant
+# Attendant (MCP-first / MySQL-only)
 
-## PWA do dono (Owner)
+Arquitetura refatorada para separar claramente:
 
-### Desenvolvimento (Vite)
+- **HTTP / Routes** (`src/http`, `src/routes`)
+- **Application / Orchestration** (`src/application/orchestration`)
+- **MCP Tools** (`src/mcp/tools`)
+- **Domain Services** (`src/domain/services`)
+- **Repositories / Persistence** (`src/repositories`)
+- **Integrations** (`src/integrations`)
+
+## Estados de atendimento
+
+- `OPEN`
+- `WAITING_IMAGE`
+- `IN_ANALYSIS`
+- `WAITING_SCHEDULE`
+- `HUMAN_HANDOFF`
+- `CLOSED`
+- `CANCELLED`
+
+Modo operacional (separado):
+
+- `AUTO`
+- `MANUAL`
+
+## Requisitos
+
+- Node.js 20+
+- MySQL 8+
+- Serviço de embeddings (Python) opcional para análise de imagem
+
+## Executar
 
 ```bash
 npm install
-npm run dev
-npm run pwa:dev
-```
-
-O Vite expõe o PWA em `http://localhost:5173` para desenvolvimento local.
-O proxy do Vite encaminha `/owner` e `/uploads` para o backend em `http://localhost:3001`, evitando CORS.
-
-### Produção (build + Express)
-
-```bash
-npm run build:pwa
+npm run migrate
+npm run seed
 npm run start
 ```
 
-Quando existir `src/pwa-owner/dist`, o Express serve o PWA em:
-
-- `http://localhost:3001/owner/pwa` (index.html)
-- `http://localhost:3001/owner/pwa/*` (SPA fallback)
-- Assets estáticos em `/owner/pwa/assets/*`
-
-## Endpoints de agenda (owner)
-
-Todos os endpoints exigem `Authorization: Bearer <OWNER_AUTH_TOKEN>`.
-
-- `GET /owner/agenda?from=YYYY-MM-DD&to=YYYY-MM-DD` — lista slots (pode omitir `from/to` para usar os próximos 14 dias).
-- `POST /owner/agenda/gerar` — gera slots (`dias`, `capacidade`, `a_partir_de`).
-- `POST /owner/agenda/bloquear` — bloqueia data/período.
-- `POST /owner/agenda/desbloquear` — desbloqueia data/período.
-
-Exemplo (curl):
+Health-check:
 
 ```bash
-curl.exe "http://localhost:3001/owner/agenda?from=2025-12-01&to=2025-12-31" -H "Authorization: Bearer <TOKEN>"
+curl http://localhost:3001/health
 ```
 
-## Testes manuais de agenda
+## Endpoints principais
 
-Gerar agenda:
+- `POST /webhook` entrada do WhatsApp (texto/imagem)
+- `POST /upload/:telefone` upload manual de imagem para orçamento
+- `GET /owner/orcamentos`
+- `POST /owner/clientes/:clienteId/interferir` (MANUAL)
+- `POST /owner/clientes/:clienteId/devolver` (AUTO)
+- `GET /owner/agenda`
 
-```bash
-curl.exe -X POST http://localhost:3001/owner/agenda/gerar -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data-raw "{\"dias\":30,\"capacidade\":3}"
-```
+## MCP tools disponíveis
 
-Ver disponibilidade:
+- `get_customer_context`
+- `get_current_attendance`
+- `save_incoming_message`
+- `save_outgoing_message`
+- `set_attendance_state`
+- `set_attendance_mode`
+- `analyze_damage_image`
+- `create_quote_from_analysis`
+- `update_quote`
+- `reserve_schedule_slot`
+- `release_schedule_slot`
+- `escalate_to_human`
+- `resume_automatic_flow`
+- `close_attendance`
+- `send_customer_message`
 
-```bash
-curl.exe "http://localhost:3001/owner/agenda?from=2025-12-01&to=2025-12-31" -H "Authorization: Bearer <TOKEN>"
-```
+## Migração
 
-Bloquear slot:
-
-```bash
-curl.exe -X POST http://localhost:3001/owner/agenda/bloquear -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data-raw "{\"data\":\"2025-12-05\",\"periodo\":\"MANHA\",\"bloqueado\":true}"
-```
-
-Desbloquear slot:
-
-```bash
-curl.exe -X POST http://localhost:3001/owner/agenda/desbloquear -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data-raw "{\"data\":\"2025-12-05\",\"periodo\":\"MANHA\"}"
-```
-
-Simular semana cheia:
-
-1. Faça `INSERT/UPDATE` em `agenda_slots` somando `reservados` total >= 5 naquela semana.
-2. Tente reservar via WhatsApp.
-3. Deve sugerir a próxima vaga na semana seguinte.
-
-## Teste manual de imagens de orçamento
-
-Após gerar um orçamento com imagem, abra no navegador:
-
-```text
-http://localhost:3001/uploads/<arquivo>
-```
-
-## Testes manuais do fluxo de atendimento
-
-### Teste A — “Olá” não pede foto
-
-1. Cliente envia: `Olá`.
-2. Esperado: resposta normal da IA, sem mensagem automática fixa pedindo foto.
-
-### Teste B — Pedido explícito de orçamento pede foto
-
-1. Cliente envia: `Quero um orçamento`.
-2. Esperado: a IA conduz a conversa de orçamento, pedindo foto e detalhes de forma natural.
-
-### Teste C — Envio de imagem cria orçamento e muda estado
-
-1. Cliente envia uma imagem (via `/upload` ou WhatsApp webhook de imagem).
-2. Esperado: orçamento criado e atendimento transita para estado controlado (`AGUARDANDO_DATA` ou `AGUARDANDO_APROVACAO_DONO`).
+Essa versão é **MySQL only**. Estruturas SQLite e scripts de migração legado foram removidos.
