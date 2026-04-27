@@ -11,6 +11,10 @@ router.post('/', async (req, res) => {
   const normalized = normalizeWppEvent(req.body);
 
   try {
+    if (normalized.fromMe === true) {
+      return res.status(200).json({ ok: true, ignored: 'fromMe' });
+    }
+
     if (normalized.kind === 'text' && normalized.phone && normalized.text) {
       const result = await orchestrator.handleIncomingText({ phone: normalized.phone, text: normalized.text });
       return res.status(200).json({ ok: true, result });

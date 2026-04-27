@@ -20,7 +20,7 @@ export async function generateAssistantReply({ systemPrompt, contextPrompt }) {
   try {
     const response = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: Number(process.env.OPENAI_TEMPERATURE ?? 0.4),
+      temperature: Number(process.env.OPENAI_TEMPERATURE ?? 0.5),
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: contextPrompt },
