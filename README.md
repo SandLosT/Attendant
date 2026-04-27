@@ -1,34 +1,12 @@
-# Attendant (MCP-first / MySQL-only)
+# Attendant (MCP real + MySQL only)
 
-Arquitetura refatorada e consolidada para separar claramente:
+Implementação com **backend principal** e **MCP server separado**, conectados por JSON-RPC.
 
-- **HTTP / Routes** (`src/http`, `src/routes`)
-- **Application / Orchestration** (`src/application/orchestration`)
-- **MCP Server + Tools** (`src/mcp/protocol`, `src/mcp/tools`)
-- **Domain Services** (`src/domain/services`)
-- **Repositories / Persistence** (`src/repositories`)
-- **Integrations** (`src/integrations`)
+## Arquitetura
 
-## Estados de atendimento
-
-- `OPEN`
-- `WAITING_IMAGE`
-- `IN_ANALYSIS`
-- `WAITING_SCHEDULE`
-- `HUMAN_HANDOFF`
-- `CLOSED`
-- `CANCELLED`
-
-Modo operacional (separado):
-
-- `AUTO`
-- `MANUAL`
-
-## Requisitos
-
-- Node.js 20+
-- MySQL 8+
-- Serviço de embeddings (Python) opcional para análise de imagem
+- **Backend principal** (`src/*`): Express, webhook, owner APIs, PWA, orquestração, integração LLM e cliente MCP.
+- **MCP server** (`mcp-server/src/*`): tools formais (com schemas), resources, prompts e handlers conectados aos services/repositories.
+- **AI layer** (`src/services/ai/*`): context builder + loop real de tool calling (`tool_choice: auto`).
 
 ## Executar
 
@@ -36,54 +14,42 @@ Modo operacional (separado):
 npm install
 npm run migrate
 npm run seed
+npm run pwa:build
+npm run mcp:start
 npm run start
 ```
 
-Health-check:
+### Healthchecks
 
 ```bash
+curl http://localhost:3100/health
 curl http://localhost:3001/health
 ```
 
-## PWA Owner
-
-Build:
-
-```bash
-npm run pwa:build
-```
-
-Shell servido pelo backend em:
-
-- `GET /owner/pwa`
-
-> O shell do PWA é público para carregar app/assets. APIs de owner permanecem protegidas por token Bearer.
-
 ## Endpoints principais
 
-- `POST /webhook` entrada do WhatsApp (texto/imagem)
-- `POST /upload/:telefone` upload manual de imagem para orçamento
+- `POST /webhook` entrada do WhatsApp
+- `GET /owner/pwa`
 - `GET /owner/orcamentos`
-- `POST /owner/clientes/:clienteId/interferir` (MANUAL)
-- `POST /owner/clientes/:clienteId/devolver` (AUTO sem reset cego)
 - `GET /owner/agenda`
 
-## MCP implementado
+## MCP server
 
-O projeto expõe um **servidor MCP JSON-RPC** em `POST /mcp` com métodos:
+Endpoint JSON-RPC:
+
+- `POST http://localhost:3100/jsonrpc`
+
+Métodos suportados:
 
 - `initialize`
 - `tools/list`
 - `tools/call`
+- `resources/list`
+- `resources/read`
+- `prompts/list`
+- `prompts/get`
 
-As tools MCP são registradas formalmente em `src/mcp/tools/definitions.js` com:
-
-- nome e descrição
-- `inputSchema`
-- `outputSchema`
-- handler
-
-Tools disponíveis:
+### Tools obrigatórias implementadas
 
 - `get_customer_context`
 - `get_current_attendance`
@@ -101,16 +67,29 @@ Tools disponíveis:
 - `close_attendance`
 - `send_customer_message`
 
-## Embedding service
+## Tool calling real (LLM)
 
-Execute o serviço Python:
+Fluxo no backend:
 
-```bash
-python embed_faiss_service.py
-```
+1. carrega contexto via MCP;
+2. envia contexto + tools ao modelo;
+3. modelo decide tools (`tool_choice: auto`);
+4. backend executa tools via MCP client;
+5. resultado retorna ao modelo;
+6. modelo produz resposta final.
 
-Porta padrão: `8001`.
+## Variáveis de ambiente
 
-## Migração
+Veja `.env.example`.
 
-Essa versão é **MySQL only**. Estruturas SQLite e scripts legado não fazem parte desta base.
+Novas/alteradas:
+
+- `MCP_PORT` (porta do processo MCP)
+- `MCP_SERVER_URL` (URL JSON-RPC usada pelo backend)
+- `MCP_TIMEOUT_MS` (timeout do cliente MCP)
+
+## Observações
+
+- Base continua **MySQL-only**.
+- `/owner/pwa` segue servido pelo backend.
+- Regras duras de negócio continuam no backend (ex.: modo MANUAL não responde automaticamente).

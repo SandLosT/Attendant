@@ -1,11 +1,11 @@
 import express from 'express';
 import { normalizeWppEvent } from '../../utils/normalizeWppEvent.js';
-import { createMcpTools } from '../../mcp/tools/registry.js';
 import { ConversationOrchestrator } from '../../application/orchestration/conversationOrchestrator.js';
 import { downloadMedia } from '../../integrations/messaging/wppMessagingService.js';
+import { getMcpClient } from '../../integrations/mcp/mcpClient.js';
 
 const router = express.Router();
-const orchestrator = new ConversationOrchestrator({ tools: createMcpTools() });
+const orchestrator = new ConversationOrchestrator({ mcpClient: getMcpClient() });
 
 router.post('/', async (req, res) => {
   const normalized = normalizeWppEvent(req.body);

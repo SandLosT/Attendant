@@ -8,7 +8,6 @@ import webhookRouter from './http/routes/webhookRouter.js';
 import imageUploadRouter from './routes/imageUploadRouter.js';
 import ownerRouter from './routes/ownerRouter.js';
 import ownerAgendaRouter from './routes/ownerAgendaRouter.js';
-import mcpJsonRpcRouter from './mcp/protocol/mcpJsonRpcRouter.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -41,7 +40,6 @@ if (fs.existsSync(pwaDistPath)) {
 }
 
 app.get('/health', (_, res) => res.json({ ok: true }));
-app.use('/mcp', mcpJsonRpcRouter);
 app.use('/webhook', webhookRouter);
 app.use('/upload', imageUploadRouter);
 app.use('/owner/agenda', ownerAgendaRouter);

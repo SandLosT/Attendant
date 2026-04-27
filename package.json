@@ -10,7 +10,8 @@
     "pwa:dev": "vite --config src/pwa-owner/vite.config.ts",
     "pwa:build": "vite build --config src/pwa-owner/vite.config.ts",
     "migrate": "knex migrate:latest",
-    "seed": "knex seed:run"
+    "seed": "knex seed:run",
+    "mcp:start": "npm --prefix mcp-server run start"
   },
   "dependencies": {
     "axios": "^1.6.8",

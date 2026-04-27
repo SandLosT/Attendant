@@ -3,10 +3,10 @@ import { ownerAuth } from '../http/middleware/ownerAuth.js';
 import { listQuotesByStatus, findQuoteById, updateQuote } from '../repositories/quoteRepository.js';
 import { findAttendanceByCustomerId, updateAttendance } from '../repositories/attendanceRepository.js';
 import { ATTENDANCE_MODE, ATTENDANCE_STATE, QUOTE_STATUS } from '../domain/constants/attendance.js';
-import { createMcpTools } from '../mcp/tools/registry.js';
+import { getMcpClient } from '../integrations/mcp/mcpClient.js';
 
 const router = express.Router();
-const mcpTools = createMcpTools();
+const mcpClient = getMcpClient();
 
 router.get('/pwa*', (_req, res, next) => next());
 router.use(ownerAuth);
@@ -48,7 +48,7 @@ router.post('/orcamentos/:id/recusar', async (req, res) => {
 router.post('/clientes/:clienteId/takeover', async (req, res) => {
   const atendimento = await findAttendanceByCustomerId(req.params.clienteId);
   if (!atendimento) return res.status(404).json({ erro: 'Atendimento não encontrado' });
-  const updated = await mcpTools.set_attendance_mode({
+  const updated = await mcpClient.callTool('set_attendance_mode', {
     customerId: Number(req.params.clienteId),
     mode: ATTENDANCE_MODE.MANUAL,
     manualReason: req.body?.motivo || 'Takeover manual',
@@ -69,7 +69,7 @@ router.post('/orcamentos/:id/fechar_manual', async (req, res) => {
     details: { manual_observacao: observacao || null },
   });
 
-  await mcpTools.close_attendance({ customerId: Number(orcamento.cliente_id) });
+  await mcpClient.callTool('close_attendance', { customerId: Number(orcamento.cliente_id) });
 
   return res.json({ orcamento: updatedQuote });
 });
@@ -78,7 +78,7 @@ router.post('/clientes/:clienteId/interferir', async (req, res) => {
   const atendimento = await findAttendanceByCustomerId(req.params.clienteId);
   if (!atendimento) return res.status(404).json({ erro: 'Atendimento não encontrado' });
 
-  const updated = await mcpTools.escalate_to_human({
+  const updated = await mcpClient.callTool('escalate_to_human', {
     customerId: Number(req.params.clienteId),
     reason: req.body?.motivo || 'Intervenção manual',
   });
@@ -90,7 +90,7 @@ router.post('/clientes/:clienteId/devolver', async (req, res) => {
   const atendimento = await findAttendanceByCustomerId(req.params.clienteId);
   if (!atendimento) return res.status(404).json({ erro: 'Atendimento não encontrado' });
 
-  const updated = await mcpTools.resume_automatic_flow({ customerId: Number(req.params.clienteId) });
+  const updated = await mcpClient.callTool('resume_automatic_flow', { customerId: Number(req.params.clienteId) });
 
   return res.json({ ok: true, atendimento: updated });
 });
