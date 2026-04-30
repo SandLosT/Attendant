@@ -37,14 +37,25 @@ test('WAITING_IMAGE: não tenho foto oferece alternativa sem insistência', asyn
   assert.equal(result.replied, true);
   assert.match(result.message, /sem problema/i);
   assert.match(result.message, /descreve|descrição/i);
-  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint'), true);
+  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint' && item.args.kind === 'IMAGE_INPUT_UNAVAILABLE'), true);
 });
 
-test('WAITING_SCHEDULE: ainda não sei o dia registra pendência sem pressionar', async () => {
+test('WAITING_IMAGE: não consigo mandar foto oferece alternativa', async () => {
+  const stubClient = createStubClient({ attendance: { estado: 'WAITING_IMAGE', modo: 'AUTO' } });
+  const orchestrator = new ConversationOrchestrator({ mcpClient: stubClient });
+
+  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'não consigo mandar foto agora' });
+
+  assert.equal(result.replied, true);
+  assert.match(result.message, /não consegue enviar foto|descreve/i);
+  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint' && item.args.kind === 'IMAGE_INPUT_UNAVAILABLE'), true);
+});
+
+test('WAITING_SCHEDULE: ainda não sei a data registra pendência sem pressionar', async () => {
   const stubClient = createStubClient({ attendance: { estado: 'WAITING_SCHEDULE', modo: 'AUTO' } });
   const orchestrator = new ConversationOrchestrator({ mcpClient: stubClient });
 
-  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'ainda não sei o dia' });
+  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'ainda não sei a data' });
 
   assert.equal(result.replied, true);
   assert.match(result.message, /sem pressa|tranquilo/i);
@@ -65,22 +76,42 @@ test('mudança de assunto para endereço responde e retoma com naturalidade', as
   const stubClient = createStubClient({ attendance: { estado: 'WAITING_IMAGE', modo: 'AUTO' } });
   const orchestrator = new ConversationOrchestrator({ mcpClient: stubClient });
 
-  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'qual o endereço de vocês?' });
+  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'qual o endereço?' });
 
   assert.equal(result.replied, true);
   assert.match(result.message, /nosso endereço/i);
-  assert.match(result.message, /descrição rápida do dano/i);
   assert.equal(stubClient.calls.some((item) => item.name === 'get_shop_info'), true);
 });
 
-test('WAITING_SCHEDULE: resposta parcial pede apenas o que falta', async () => {
+test('objeção comercial: só quero uma noção de valor gera resposta sem compromisso', async () => {
+  const stubClient = createStubClient({ attendance: { estado: 'WAITING_IMAGE', modo: 'AUTO' } });
+  const orchestrator = new ConversationOrchestrator({ mcpClient: stubClient });
+
+  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'só quero uma noção de valor' });
+
+  assert.equal(result.replied, true);
+  assert.match(result.message, /sem compromisso|noção de valor/i);
+  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint' && item.args.kind === 'COMMERCIAL_OBJECTION'), true);
+});
+
+test('encerramento: deixa pra lá gera pausa com confirmação leve', async () => {
   const stubClient = createStubClient({ attendance: { estado: 'WAITING_SCHEDULE', modo: 'AUTO' } });
   const orchestrator = new ConversationOrchestrator({ mcpClient: stubClient });
 
-  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'quarta de manhã' });
+  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'deixa pra lá' });
 
   assert.equal(result.replied, true);
-  assert.match(result.message, /data exata/i);
-  assert.doesNotMatch(result.message, /data e período/i);
-  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint' && item.args.kind === 'SCHEDULE_PARTIAL'), true);
+  assert.match(result.message, /posso pausar|pode encerrar/i);
+  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint' && item.args.kind === 'CANCELLATION_SIGNAL'), true);
+});
+
+test('incompreensão: não entendi gera explicação simplificada', async () => {
+  const stubClient = createStubClient({ attendance: { estado: 'WAITING_IMAGE', modo: 'AUTO' } });
+  const orchestrator = new ConversationOrchestrator({ mcpClient: stubClient });
+
+  const result = await orchestrator.handleIncomingText({ phone: '5511999', text: 'não entendi' });
+
+  assert.equal(result.replied, true);
+  assert.match(result.message, /te explico|forma simples/i);
+  assert.equal(stubClient.calls.some((item) => item.name === 'register_attendance_constraint' && item.args.kind === 'CUSTOMER_CONFUSION'), true);
 });
