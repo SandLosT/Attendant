@@ -2,6 +2,7 @@ import { ATTENDANCE_MODE, ATTENDANCE_STATE, QUOTE_STATUS } from '../../domain/co
 import { inferQuoteFromImageAnalysis } from '../../domain/services/quoteDomainService.js';
 import { parseDateAndPeriod, normalizePeriod } from '../../domain/services/scheduleDomainService.js';
 import { shouldAutomationReply } from '../../domain/services/attendanceDomainService.js';
+import { interpretUserTurn } from '../../domain/services/userMessageInterpreter.js';
 import { buildConversationContext } from '../../services/ai/contextBuilder.js';
 import { runToolCallingChat } from '../../services/ai/toolCallingChatService.js';
 
@@ -18,47 +19,24 @@ function baseSystemPrompt() {
   ].join(' ');
 }
 
-function normalizeText(value = '') {
-  return String(value)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '');
-}
+function resolveNextAction({ attendance, interpretation }) {
+  const [topMove] = interpretation.recommendedNextMoves;
 
-function detectConversationSignal({ text, attendance }) {
-  const normalized = normalizeText(text);
-  const parsedSchedule = parseDateAndPeriod(text);
-  const hasPeriod = Boolean(normalizePeriod(parsedSchedule.periodo));
-  const weekDayMention = /(segunda|terca|quarta|quinta|sexta|sabado|domingo)/.test(normalized);
+  if (topMove === 'escalate_to_human') return { type: 'HUMAN_HANDOFF' };
+  if (topMove === 'resume_automatic_flow') return { type: 'RESUME_AUTOMATION' };
+  if (topMove === 'get_shop_info') return { type: 'ANSWER_TOPIC_SHIFT' };
+  if (topMove === 'confirm_pause_or_cancellation') return { type: 'CANCELLATION_FLOW' };
+  if (topMove === 'offer_non_committal_estimate') return { type: 'COMMERCIAL_OBJECTION_FLOW' };
+  if (topMove === 'offer_operational_alternative') return { type: 'OPERATIONAL_OBJECTION_FLOW' };
+  if (topMove === 'simplify_request') return { type: 'CONFUSION_FLOW' };
 
-  return {
-    asksHuman: /(falar com (alguem|uma pessoa)|atendente humano|especialista|quero humano)/.test(normalized),
-    resumeAutomation: /(voltar (pro|para) automatico|retomar automatico|pode seguir no auto)/.test(normalized),
-    noImageAvailable: /(nao tenho foto|sem foto|nao tenho imagem)/.test(normalized),
-    imageUploadBlocked: /(nao consigo (enviar|mandar).*(foto|imagem)|celular.*nao.*(envia|manda).*(foto|imagem))/.test(normalized),
-    scheduleUnknown: /(nao sei (o )?dia|ainda nao sei (o )?dia|depois eu confirmo)/.test(normalized),
-    asksAddress: /(qual (e|é) o endereco|endereco de voces|onde voces ficam|localizacao|localizacao de voces)/.test(normalized),
-    partialSchedule: hasPeriod && !parsedSchedule.data && weekDayMention,
-    parsedSchedule,
-    blockedCurrentStage: attendance?.estado === ATTENDANCE_STATE.WAITING_IMAGE
-      && (/(nao tenho foto|sem foto|nao tenho imagem)/.test(normalized) || /(nao consigo (enviar|mandar).*(foto|imagem)|celular.*nao.*(envia|manda).*(foto|imagem))/.test(normalized)),
-  };
-}
+  if (interpretation.blockingConstraint?.kind === 'IMAGE_INPUT_UNAVAILABLE') return { type: 'IMAGE_ALTERNATIVE' };
+  if (interpretation.blockingConstraint?.kind === 'SCHEDULE_INPUT_UNAVAILABLE') return { type: 'SCHEDULE_PENDING' };
 
-function determineNextAction({ attendance, signal }) {
-  if (signal.asksHuman) return { type: 'HUMAN_HANDOFF' };
-  if (signal.resumeAutomation && attendance?.modo === ATTENDANCE_MODE.MANUAL) return { type: 'RESUME_AUTOMATION' };
-  if (signal.asksAddress) return { type: 'ANSWER_ADDRESS_AND_RESUME' };
-
-  if (attendance?.estado === ATTENDANCE_STATE.WAITING_IMAGE && signal.blockedCurrentStage) {
-    return { type: 'IMAGE_ALTERNATIVE' };
-  }
-
-  if (attendance?.estado === ATTENDANCE_STATE.WAITING_SCHEDULE && signal.scheduleUnknown) {
-    return { type: 'SCHEDULE_PENDING' };
-  }
-
-  if (attendance?.estado === ATTENDANCE_STATE.WAITING_SCHEDULE && signal.partialSchedule) {
+  const parsed = interpretation.parsedSchedule;
+  const weekDayMention = /(segunda|terca|quarta|quinta|sexta|sabado|domingo)/.test(interpretation.raw.normalizedText);
+  const hasPeriod = Boolean(normalizePeriod(parsed.periodo));
+  if (attendance?.estado === ATTENDANCE_STATE.WAITING_SCHEDULE && hasPeriod && !parsed.data && weekDayMention) {
     return { type: 'SCHEDULE_PARTIAL' };
   }
 
@@ -79,6 +57,7 @@ function toolsByState(state) {
     'close_attendance',
     'register_attendance_constraint',
     'get_shop_info',
+    'register_conversation_signal',
   ];
 
   if (state === ATTENDANCE_STATE.WAITING_IMAGE) {
@@ -129,113 +108,20 @@ export class ConversationOrchestrator {
 
     await this.mcpClient.callTool('save_incoming_message', { customerId: customer.id, message: text });
 
-    const signal = detectConversationSignal({ text, attendance });
-    const nextAction = determineNextAction({ attendance, signal });
+    const interpretation = interpretUserTurn({ text, attendance });
+    const nextAction = resolveNextAction({ attendance, interpretation });
 
-    if (nextAction.type === 'HUMAN_HANDOFF') {
-      await this.mcpClient.callTool('register_attendance_constraint', {
-        customerId: customer.id,
-        kind: 'HUMAN_REQUEST',
-        detail: text,
-        blockedStage: attendance.estado,
-      });
-      await this.mcpClient.callTool('escalate_to_human', { customerId: customer.id, reason: 'Solicitação explícita do cliente' });
-      return this.sendAndPersist({
-        customerId: customer.id,
-        phone,
-        state: ATTENDANCE_STATE.HUMAN_HANDOFF,
-        message: 'Perfeito, vou te encaminhar para um especialista humano agora. Se quiser, já deixo registrado o contexto para agilizar o atendimento.',
-      });
-    }
+    await this.mcpClient.callTool('register_conversation_signal', {
+      customerId: customer.id,
+      interpretation,
+      sourceText: text,
+      state: attendance.estado,
+      mode: attendance.modo,
+      nextBestGoal: interpretation.recommendedNextMoves[0],
+    });
 
-    if (nextAction.type === 'RESUME_AUTOMATION') {
-      const resumed = await this.mcpClient.callTool('resume_automatic_flow', { customerId: customer.id });
-      await this.mcpClient.callTool('register_attendance_constraint', {
-        customerId: customer.id,
-        kind: 'AUTO_RESUMED',
-        detail: 'Cliente solicitou retorno do fluxo automático',
-        blockedStage: attendance.estado,
-      });
-      return this.sendAndPersist({
-        customerId: customer.id,
-        phone,
-        state: resumed.estado,
-        message: 'Combinado, retomamos o fluxo automático. Me conta o que você consegue enviar agora para eu avançar sem te travar.',
-      });
-    }
-
-    if (nextAction.type === 'ANSWER_ADDRESS_AND_RESUME') {
-      const shop = await this.mcpClient.callTool('get_shop_info', {});
-      await this.mcpClient.callTool('register_attendance_constraint', {
-        customerId: customer.id,
-        kind: 'TOPIC_SHIFT',
-        detail: 'Cliente pediu endereço durante fluxo operacional',
-        blockedStage: attendance.estado,
-      });
-      const address = shop?.endereco || 'Posso te confirmar o endereço com nosso especialista';
-      const resumeHint = attendance.estado === ATTENDANCE_STATE.WAITING_IMAGE
-        ? 'Quando puder, também pode me mandar uma descrição rápida do dano para eu seguir sem depender da foto.'
-        : attendance.estado === ATTENDANCE_STATE.WAITING_SCHEDULE
-          ? 'Quando quiser, me diz uma opção de data/período e eu continuo daqui.'
-          : 'Se quiser, seguimos do ponto em que paramos.';
-
-      return this.sendAndPersist({
-        customerId: customer.id,
-        phone,
-        state: attendance.estado,
-        message: `Nosso endereço é: ${address}. ${resumeHint}`,
-      });
-    }
-
-    if (nextAction.type === 'IMAGE_ALTERNATIVE') {
-      await this.mcpClient.callTool('register_attendance_constraint', {
-        customerId: customer.id,
-        kind: signal.noImageAvailable ? 'IMAGE_UNAVAILABLE' : 'IMAGE_UPLOAD_BLOCKED',
-        detail: text,
-        blockedStage: attendance.estado,
-        pendingItems: ['imagem_do_dano'],
-        alternatives: ['descricao_textual', 'especialista_humano'],
-      });
-      return this.sendAndPersist({
-        customerId: customer.id,
-        phone,
-        state: attendance.estado,
-        message: 'Sem problema. Se você não consegue enviar foto agora, me descreve rapidinho o dano por texto e eu avanço por aqui. Se preferir, também posso te encaminhar para um especialista humano.',
-      });
-    }
-
-    if (nextAction.type === 'SCHEDULE_PENDING') {
-      await this.mcpClient.callTool('register_attendance_constraint', {
-        customerId: customer.id,
-        kind: 'SCHEDULE_UNDEFINED',
-        detail: text,
-        blockedStage: attendance.estado,
-        pendingItems: ['data_e_periodo'],
-        alternatives: ['registrar_pendencia_sem_pressao', 'especialista_humano'],
-      });
-      return this.sendAndPersist({
-        customerId: customer.id,
-        phone,
-        state: attendance.estado,
-        message: 'Tranquilo, sem pressa com a data. Posso deixar essa pendência registrada e, quando você definir o dia, eu encaixo o período rapidinho. Se preferir, te passo para um especialista seguir contigo.',
-      });
-    }
-
-    if (nextAction.type === 'SCHEDULE_PARTIAL') {
-      await this.mcpClient.callTool('register_attendance_constraint', {
-        customerId: customer.id,
-        kind: 'SCHEDULE_PARTIAL',
-        detail: text,
-        blockedStage: attendance.estado,
-        pendingItems: ['data_exata'],
-      });
-      return this.sendAndPersist({
-        customerId: customer.id,
-        phone,
-        state: attendance.estado,
-        message: 'Perfeito, já considerei o período da manhã. Agora me passa só a data exata (dd/mm) para eu confirmar a agenda sem refazer a coleta toda.',
-      });
-    }
+    const handled = await this.handleStructuredAction({ customer, attendance, phone, text, interpretation, nextAction });
+    if (handled) return handled;
 
     if (!shouldAutomationReply(attendance) || attendance.modo === ATTENDANCE_MODE.MANUAL) {
       return { replied: false, reason: 'manual_mode' };
@@ -253,7 +139,12 @@ export class ConversationOrchestrator {
       }
     }
 
-    const contextPrompt = buildConversationContext({ context, customerMessage: text, signal, nextAction: nextAction.type });
+    const contextPrompt = buildConversationContext({
+      context,
+      customerMessage: text,
+      interpretation,
+      nextAction: nextAction.type,
+    });
 
     let finalMessage = '';
     try {
@@ -280,6 +171,185 @@ export class ConversationOrchestrator {
       state: attendance.estado,
       message: finalMessage,
     });
+  }
+
+  async handleStructuredAction({ customer, attendance, phone, text, interpretation, nextAction }) {
+    const handlers = {
+      HUMAN_HANDOFF: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'HUMAN_REQUEST',
+          detail: text,
+          blockedStage: attendance.estado,
+          handoffRequested: true,
+          nextBestGoal: 'escalate_to_human',
+        });
+        await this.mcpClient.callTool('escalate_to_human', { customerId: customer.id, reason: 'Solicitação explícita do cliente' });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: ATTENDANCE_STATE.HUMAN_HANDOFF,
+          message: 'Perfeito, vou te encaminhar para um especialista humano agora. Se quiser, já deixo registrado o contexto para agilizar o atendimento.',
+        });
+      },
+      RESUME_AUTOMATION: async () => {
+        const resumed = await this.mcpClient.callTool('resume_automatic_flow', { customerId: customer.id });
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'AUTO_RESUMED',
+          detail: 'Cliente solicitou retorno do fluxo automático',
+          blockedStage: attendance.estado,
+          nextBestGoal: 'resume_automatic_flow',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: resumed.estado,
+          message: 'Combinado, retomamos o fluxo automático. Me conta o que você consegue enviar agora para eu avançar sem te travar.',
+        });
+      },
+      ANSWER_TOPIC_SHIFT: async () => {
+        const shop = await this.mcpClient.callTool('get_shop_info', {});
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'TOPIC_SHIFT',
+          detail: text,
+          blockedStage: attendance.estado,
+          topicShift: interpretation.topicShift?.kind,
+          nextBestGoal: 'return_to_main_flow_after_shop_info',
+        });
+        const address = shop?.endereco || 'Posso te confirmar o endereço com nosso especialista';
+        const resumeHint = attendance.estado === ATTENDANCE_STATE.WAITING_IMAGE
+          ? 'Quando puder, também pode me mandar uma descrição rápida do dano para eu seguir sem depender da foto.'
+          : attendance.estado === ATTENDANCE_STATE.WAITING_SCHEDULE
+            ? 'Quando quiser, me diz uma opção de data/período e eu continuo daqui.'
+            : 'Se quiser, seguimos do ponto em que paramos.';
+
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: `Nosso endereço é: ${address}. ${resumeHint}`,
+        });
+      },
+      IMAGE_ALTERNATIVE: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'IMAGE_INPUT_UNAVAILABLE',
+          detail: text,
+          blockedStage: attendance.estado,
+          pendingItems: ['imagem_do_dano'],
+          alternatives: ['descricao_textual', 'especialista_humano'],
+          missingRequiredInput: interpretation.missingRequiredInput,
+          nextBestGoal: 'collect_damage_description',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Sem problema. Se você não consegue enviar foto agora, me descreve rapidinho o dano por texto e eu avanço por aqui. Se preferir, também posso te encaminhar para um especialista humano.',
+        });
+      },
+      SCHEDULE_PENDING: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'SCHEDULE_UNDEFINED',
+          detail: text,
+          blockedStage: attendance.estado,
+          pendingItems: ['data_e_periodo'],
+          alternatives: ['registrar_pendencia_sem_pressao', 'especialista_humano'],
+          missingRequiredInput: interpretation.missingRequiredInput,
+          nextBestGoal: 'wait_customer_availability',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Tranquilo, sem pressa com a data. Posso deixar essa pendência registrada e, quando você definir o dia, eu encaixo o período rapidinho. Se preferir, te passo para um especialista seguir contigo.',
+        });
+      },
+      SCHEDULE_PARTIAL: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'SCHEDULE_PARTIAL',
+          detail: text,
+          blockedStage: attendance.estado,
+          pendingItems: ['data_exata'],
+          nextBestGoal: 'collect_exact_date',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Perfeito, já considerei o período da manhã. Agora me passa só a data exata (dd/mm) para eu confirmar a agenda sem refazer a coleta toda.',
+        });
+      },
+      COMMERCIAL_OBJECTION_FLOW: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'COMMERCIAL_OBJECTION',
+          detail: text,
+          blockedStage: attendance.estado,
+          customerPreference: interpretation.customerPreference,
+          nextBestGoal: 'offer_estimate_without_commitment',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Perfeito, sem compromisso. Posso te passar uma noção de valor por descrição e depois você decide com calma se quer seguir.',
+        });
+      },
+      OPERATIONAL_OBJECTION_FLOW: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'OPERATIONAL_OBJECTION',
+          detail: text,
+          blockedStage: attendance.estado,
+          urgency: interpretation.urgency,
+          nextBestGoal: 'offer_operational_path',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Entendi seu cenário. A gente consegue adaptar: posso seguir por descrição agora e já priorizar o próximo horário viável para você.',
+        });
+      },
+      CANCELLATION_FLOW: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'CANCELLATION_SIGNAL',
+          detail: text,
+          blockedStage: attendance.estado,
+          nextBestGoal: 'confirm_cancellation_intent',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Tudo bem, posso pausar por aqui. Se preferir, eu já encerro agora — é só me confirmar com "pode encerrar".',
+        });
+      },
+      CONFUSION_FLOW: async () => {
+        await this.mcpClient.callTool('register_attendance_constraint', {
+          customerId: customer.id,
+          kind: 'CUSTOMER_CONFUSION',
+          detail: text,
+          blockedStage: attendance.estado,
+          nextBestGoal: 'clarify_single_step',
+        });
+        return this.sendAndPersist({
+          customerId: customer.id,
+          phone,
+          state: attendance.estado,
+          message: 'Claro — te explico de forma simples. Agora eu só preciso de uma informação por vez para avançar sem te tomar tempo.',
+        });
+      },
+    };
+
+    const handler = handlers[nextAction.type];
+    return handler ? handler() : null;
   }
 
   async handleIncomingImage({ phone, base64, mimetype, filename }) {

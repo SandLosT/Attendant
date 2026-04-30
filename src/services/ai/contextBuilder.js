@@ -31,7 +31,7 @@ function summarizeSignals(signals = []) {
     .join(', ');
 }
 
-export function buildConversationContext({ context, customerMessage, signal = null, nextAction = null }) {
+export function buildConversationContext({ context, customerMessage, interpretation = null, nextAction = null }) {
   const customer = context?.customer || {};
   const attendance = context?.attendance || {};
   const quote = context?.activeQuote || null;
@@ -59,7 +59,7 @@ export function buildConversationContext({ context, customerMessage, signal = nu
     `Dados faltantes: ${missing.length ? missing.join(', ') : 'nenhum'}`,
     `Objetivo desta etapa: ${stageObjective(attendance.estado)}`,
     `Sinais operacionais recentes: ${summarizeSignals(operationalSignals)}`,
-    `Sinal detectado na mensagem atual: ${signal ? JSON.stringify(signal) : 'nenhum sinal explícito'}`,
+    `Interpretação estruturada da mensagem atual: ${interpretation ? JSON.stringify(interpretation) : 'nenhum sinal explícito'}`,
     `Próxima ação sugerida pela orquestração: ${nextAction || 'indefinida'}`,
     'Se insistir no que o cliente acabou de negar for inadequado, ofereça alternativa prática.',
     `Estilo recomendado: ${stageStyle(attendance.estado)}. Responda em até 3 frases curtas.`,

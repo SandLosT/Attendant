@@ -103,11 +103,17 @@ export function getToolDefinitions() {
           alternatives: { type: 'array', items: { type: 'string' } },
           setState: { type: 'string' },
           setMode: { type: 'string' },
+          topicShift: { type: 'string' },
+          missingRequiredInput: { type: 'array', items: { type: 'string' } },
+          customerPreference: { type: 'string' },
+          urgency: { type: 'string' },
+          nextBestGoal: { type: 'string' },
+          handoffRequested: { type: 'boolean' },
         },
         required: ['customerId', 'kind'],
       },
       outputSchema: { type: 'object' },
-      handler: async ({ customerId, kind, detail = null, blockedStage = null, pendingItems = [], alternatives = [], setState = null, setMode = null }) => {
+      handler: async ({ customerId, kind, detail = null, blockedStage = null, pendingItems = [], alternatives = [], setState = null, setMode = null, topicShift = null, missingRequiredInput = [], customerPreference = null, urgency = null, nextBestGoal = null, handoffRequested = false }) => {
         const normalizedCustomerId = Number(customerId);
         const event = {
           kind,
@@ -115,6 +121,12 @@ export function getToolDefinitions() {
           blockedStage,
           pendingItems,
           alternatives,
+          topicShift,
+          missingRequiredInput,
+          customerPreference,
+          urgency,
+          nextBestGoal,
+          handoffRequested,
           createdAt: new Date().toISOString(),
         };
 
@@ -134,6 +146,46 @@ export function getToolDefinitions() {
           : await getOrCreateAttendance(normalizedCustomerId);
 
         return { ok: true, event, attendance };
+      },
+    },
+    {
+      name: 'register_conversation_signal',
+      description: 'Registra interpretação estruturada da mensagem para memória conversacional (MCP).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          customerId: { type: 'number' },
+          sourceText: { type: 'string' },
+          state: { type: 'string' },
+          mode: { type: 'string' },
+          nextBestGoal: { type: 'string' },
+          interpretation: { type: 'object' },
+        },
+        required: ['customerId', 'interpretation'],
+      },
+      outputSchema: { type: 'object' },
+      handler: async ({ customerId, sourceText = '', state = null, mode = null, nextBestGoal = null, interpretation }) => {
+        const normalizedCustomerId = Number(customerId);
+        const event = {
+          kind: 'MESSAGE_INTERPRETATION',
+          state,
+          mode,
+          sourceText,
+          nextBestGoal,
+          primarySignal: interpretation?.primarySignal || 'NONE',
+          secondarySignals: interpretation?.secondarySignals || [],
+          blockingConstraint: interpretation?.blockingConstraint || null,
+          missingRequiredInput: interpretation?.missingRequiredInput || [],
+          handoffRequested: Boolean(interpretation?.handoffRequested),
+          topicShift: interpretation?.topicShift || null,
+          urgency: interpretation?.urgency || 'NORMAL',
+          customerPreference: interpretation?.customerPreference || null,
+          confidence: interpretation?.confidence || 0,
+          recommendedNextMoves: interpretation?.recommendedNextMoves || [],
+          createdAt: new Date().toISOString(),
+        };
+        await persistSignal({ customerId: normalizedCustomerId, payload: event });
+        return { ok: true, event };
       },
     },
     { name: 'close_attendance', description: 'Fecha atendimento e encerra orçamento atual quando existir.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' } }, required: ['customerId'] }, outputSchema: { type: 'object' }, handler: async ({ customerId }) => { const attendance = await getOrCreateAttendance(Number(customerId)); if (attendance.orcamento_id_atual) await updateQuote(attendance.orcamento_id_atual, { status: QUOTE_STATUS.CLOSED, fechado_em: new Date() }); return updateAttendance(Number(customerId), { estado: ATTENDANCE_STATE.CLOSED }); } },
