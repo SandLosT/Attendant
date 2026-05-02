@@ -40,9 +40,22 @@ router.post('/', async (req, res) => {
 
     return res.status(200).json({ ok: true, ignored: 'unsupported' });
   } catch (error) {
-    console.error('webhook error', error);
-    return res.status(500).json({ erro: error.message });
-  }
+  console.error('webhook error full', {
+    name: error?.name,
+    message: error?.message,
+    code: error?.code,
+    status: error?.status,
+    stack: error?.stack,
+    response: error?.response?.data,
+    cause: error?.cause,
+    raw: error,
+  });
+
+  return res.status(500).json({
+    erro: error?.message || error?.code || 'Erro interno sem mensagem',
+    detalhes: error?.response?.data || error?.cause || null,
+  });
+}
 });
 
 export default router;

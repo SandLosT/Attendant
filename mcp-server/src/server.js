@@ -3,6 +3,9 @@ import 'dotenv/config';
 import { getToolDefinitions } from './tools/definitions.js';
 import { listResourceTemplates, listResources, readResource } from './resources/definitions.js';
 import { listPrompts, getPrompt } from './prompts/definitions.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
 
 const PROTOCOL_VERSION = '2024-11-05';
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
@@ -98,9 +101,13 @@ export function createMcpApp({ toolsOverride = null, resourcesApi = null, prompt
   return app;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const currentFile = fileURLToPath(import.meta.url);
+const executedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
+
+if (executedFile && path.resolve(currentFile) === executedFile) {
   const PORT = Number(process.env.MCP_PORT || 3100);
   const app = createMcpApp();
+
   app.listen(PORT, () => {
     console.log(`[mcp] servidor MCP online na porta ${PORT}`);
   });

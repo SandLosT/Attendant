@@ -7,15 +7,34 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: __dirname,
+
+  // Em produção/build, o PWA continua preparado para rodar em /owner/pwa/.
+  // No dev server, também permite abrir http://localhost:5173/owner/pwa/
+  // sem o proxy mandar essa rota para o backend.
   base: "/owner/pwa/",
+
   plugins: [react()],
+
   publicDir: "public",
+
   server: {
+    port: 5173,
+
     proxy: {
-      "/owner": "http://localhost:3001",
-      "/uploads": "http://localhost:3001",
+      // Não proxyar /owner/pwa/*, porque essa rota pertence ao frontend.
+      // Proxyar apenas as APIs /owner/*, como /owner/orcamentos, /owner/agenda etc.
+      "^/owner/(?!pwa(?:/|$)).*": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+
+      "/uploads": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
     },
   },
+
   build: {
     outDir: resolve(__dirname, "dist"),
     emptyOutDir: true,

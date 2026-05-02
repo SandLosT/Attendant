@@ -19,6 +19,10 @@ const required = (value, field) => {
 const asText = (value) => (typeof value === 'string' ? value : String(value ?? ''));
 const SIGNAL_PREFIX = '[ATTENDANCE_SIGNAL] ';
 
+function isOperationalSignalMessage(message) {
+  return typeof message?.mensagem === 'string' && message.mensagem.startsWith(SIGNAL_PREFIX);
+}
+
 async function ensureSlot(data, periodo, capacidade = Number(process.env.AGENDA_CAPACIDADE_PADRAO || 3)) {
   const existing = await findSlot(data, periodo);
   if (existing) return existing;
@@ -40,7 +44,7 @@ async function getActiveQuoteForCustomer(customerId, attendance = null) {
 
 function parseOperationalSignals(messages = []) {
   return messages
-    .filter((message) => message.tipo === 'resposta' && typeof message.mensagem === 'string' && message.mensagem.startsWith(SIGNAL_PREFIX))
+    .filter(isOperationalSignalMessage)
     .map((message) => {
       try {
         return JSON.parse(message.mensagem.slice(SIGNAL_PREFIX.length));
@@ -49,13 +53,13 @@ function parseOperationalSignals(messages = []) {
       }
     })
     .filter(Boolean)
-    .slice(-6);
+    .slice(-10);
 }
 
 async function persistSignal({ customerId, payload }) {
   await saveMessage({
     customerId: Number(customerId),
-    direction: 'resposta',
+    direction: 'sistema',
     content: `${SIGNAL_PREFIX}${JSON.stringify(payload)}`,
   });
 }
@@ -68,14 +72,29 @@ export function getToolDefinitions() {
       inputSchema: { type: 'object', properties: { phone: { type: 'string' } }, required: ['phone'] },
       outputSchema: { type: 'object' },
       handler: async ({ phone }) => {
-        required(phone, 'phone');
-        const customer = await getOrCreateCustomer(phone);
-        const attendance = await getOrCreateAttendance(customer.id);
-        const activeQuote = await getActiveQuoteForCustomer(customer.id, attendance);
-        const messages = (await listRecentMessages(customer.id, 20)).reverse();
-        const operationalSignals = parseOperationalSignals(messages);
-        return { customer, attendance, activeQuote, messages, operationalSignals };
-      },
+      required(phone, 'phone');
+
+      const customer = await getOrCreateCustomer(phone);
+      const attendance = await getOrCreateAttendance(customer.id);
+      const activeQuote = await getActiveQuoteForCustomer(customer.id, attendance);
+
+      const allRecentMessages = (await listRecentMessages(customer.id, 30)).reverse();
+
+      const operationalSignals = parseOperationalSignals(allRecentMessages);
+
+      const messages = allRecentMessages
+        .filter((message) => !isOperationalSignalMessage(message))
+        .filter((message) => message.tipo !== 'sistema')
+        .slice(-20);
+
+      return {
+        customer,
+        attendance,
+        activeQuote,
+        messages,
+        operationalSignals,
+      };
+    },
     },
     { name: 'get_current_attendance', description: 'Retorna (ou cria) atendimento atual do cliente.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' } }, required: ['customerId'] }, outputSchema: { type: 'object' }, handler: async ({ customerId }) => getOrCreateAttendance(Number(customerId)) },
     { name: 'save_incoming_message', description: 'Persiste mensagem recebida do cliente.', inputSchema: { type: 'object', properties: { customerId: { type: 'number' }, message: { type: 'string' } }, required: ['customerId', 'message'] }, outputSchema: { type: 'object' }, handler: async ({ customerId, message }) => { await saveMessage({ customerId: Number(customerId), direction: 'entrada', content: asText(message) }); return { ok: true }; } },
